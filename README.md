@@ -44,33 +44,46 @@ npm run dev
 
 打开 Vite 输出的本地地址。
 
-## 部署：Vercel 前端 + Render 后端
+## 部署：Vercel 前端 + Railway 后端
 
-### Render 后端
+### Railway 后端
 
-仓库根目录已经提供 `render.yaml`。
+仓库根目录已经提供：
 
-在 Render 新建 Blueprint 或 Web Service：
+- `Dockerfile`
+- `railway.json`
 
-- Root Directory: `backend`
-- Build Command: `pip install -r requirements.txt`
-- Start Command: `uvicorn app.main:app --host 0.0.0.0 --port $PORT`
-- Health Check Path: `/api/health`
+在 Railway 新建服务并连接 GitHub 仓库后，Railway 会使用根目录 Dockerfile 构建后端。
 
-建议挂载 Persistent Disk：
-
-- Mount Path: `/var/data`
-- 环境变量：`STOCKAI_DB_PATH=/var/data/stockai.db`
-
-Render 环境变量：
+Railway 环境变量：
 
 ```text
-STOCKAI_DB_PATH=/var/data/stockai.db
+STOCKAI_DB_PATH=/app/data/stockai.db
 CORS_ORIGINS=https://你的前端域名.vercel.app
 CORS_ORIGIN_REGEX=https://.*\.vercel\.app
+OPENAI_TIMEOUT_SECONDS=60
+OPENAI_MAX_RETRIES=1
 ```
 
-`CORS_ORIGIN_REGEX` 用于允许 Vercel Preview URL。正式上线后可以只保留 `CORS_ORIGINS`。
+如果使用 SQLite 保存数据，需要在 Railway 添加 Volume：
+
+```text
+Mount Path: /app/data
+```
+
+如果只是临时测试，也可以不挂 Volume，但服务重启或重新部署后 SQLite 数据可能丢失。
+
+后端健康检查地址：
+
+```text
+/api/health
+```
+
+部署成功后，Railway 会给出类似下面的后端域名：
+
+```text
+https://your-stockai-api.up.railway.app
+```
 
 ### Vercel 前端
 
@@ -84,14 +97,14 @@ CORS_ORIGIN_REGEX=https://.*\.vercel\.app
 Vercel 环境变量：
 
 ```text
-VITE_API_BASE_URL=https://你的-render后端.onrender.com
+VITE_API_BASE_URL=https://你的-railway后端.up.railway.app
 ```
 
-部署后，回到 Render 更新 `CORS_ORIGINS` 为真实 Vercel 域名。
+部署后，回到 Railway 更新 `CORS_ORIGINS` 为真实 Vercel 域名。
 
 ### 客户测试注意
 
-当前项目没有登录系统。给客户测试时，建议先使用 Vercel/Render 的访问保护，或只把链接发给可信客户。多个客户同时测试前，应先增加账号和数据隔离。
+当前项目没有登录系统。给客户测试时，建议先只发给可信客户，或启用 Vercel/Railway 的访问保护。多个客户同时测试前，应先增加账号和数据隔离。
 
 ## 模型配置
 
@@ -101,21 +114,36 @@ VITE_API_BASE_URL=https://你的-render后端.onrender.com
 - `openai`：使用 OpenAI API
 - `openai-compatible`：使用兼容 OpenAI Chat Completions 的接口，例如本地 Ollama
 
-API key 只保存在本地 SQLite 数据库，不提交到仓库。
+API key 只保存在 SQLite 数据库，不提交到仓库。部署到 Railway 后，如果没有挂 Volume，API key 配置也可能随重启丢失。
+
+### OpenAI API
+
+客户测试推荐使用 OpenAI API：
+
+```text
+Provider: OpenAI API
+Model: gpt-4.1-mini
+Base URL: 留空
+API Key: sk-...
+```
 
 ### Ollama 示例
+
+本地开发时可用 Ollama：
 
 ```powershell
 ollama pull qwen2.5:7b
 ollama serve
 ```
 
-然后在网页“设置”里填写：
+然后在网页“模型”里填写：
 
 - Provider: `OpenAI-compatible`
 - Model: `qwen2.5:7b`
 - Base URL: `http://127.0.0.1:11434/v1`
 - API Key: `ollama`
+
+云端部署后，`127.0.0.1` 指的是云服务器，不是你的电脑。因此客户测试建议使用 OpenAI API。
 
 ## 分析说明
 
