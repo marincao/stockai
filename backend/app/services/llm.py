@@ -1,9 +1,13 @@
 from __future__ import annotations
 
 import json
+import os
 from abc import ABC, abstractmethod
 from typing import Any
 
+
+OPENAI_TIMEOUT_SECONDS = float(os.getenv("OPENAI_TIMEOUT_SECONDS", "60"))
+OPENAI_MAX_RETRIES = int(os.getenv("OPENAI_MAX_RETRIES", "1"))
 
 SYSTEM_PROMPT = """你是一个谨慎的A股公告研究助手。请只基于公告内容输出结构化研究提醒。
 不要给出买入或卖出指令。输出必须是JSON。"""
@@ -78,7 +82,12 @@ class OpenAICompatibleProvider(LLMProvider):
     def analyze(self, announcement: dict[str, Any], content: str) -> dict[str, Any]:
         from openai import OpenAI
 
-        client = OpenAI(api_key=self.api_key or "not-needed", base_url=self.base_url)
+        client = OpenAI(
+            api_key=self.api_key or "not-needed",
+            base_url=self.base_url,
+            timeout=OPENAI_TIMEOUT_SECONDS,
+            max_retries=OPENAI_MAX_RETRIES,
+        )
         response = client.chat.completions.create(
             model=self.model,
             messages=[
@@ -87,6 +96,7 @@ class OpenAICompatibleProvider(LLMProvider):
             ],
             response_format={"type": "json_object"},
             temperature=0.2,
+            max_tokens=1400,
         )
         return normalize_analysis(json.loads(response.choices[0].message.content or "{}"))
 
@@ -113,11 +123,17 @@ class OpenAICompatibleProvider(LLMProvider):
             messages.append({"role": role, "content": str(item.get("content", ""))[:3000]})
         messages.append({"role": "user", "content": message})
 
-        client = OpenAI(api_key=self.api_key or "not-needed", base_url=self.base_url)
+        client = OpenAI(
+            api_key=self.api_key or "not-needed",
+            base_url=self.base_url,
+            timeout=OPENAI_TIMEOUT_SECONDS,
+            max_retries=OPENAI_MAX_RETRIES,
+        )
         response = client.chat.completions.create(
             model=self.model,
             messages=messages,
             temperature=0.2,
+            max_tokens=1400,
         )
         return response.choices[0].message.content or ""
 
@@ -162,7 +178,7 @@ action_suggestion 必须给出明确结论，例如“继续关注：...”或�
 
 
 def build_chat_context_prompt(announcement: dict[str, Any], content: str) -> str:
-    trimmed = content[:16000]
+    trimmed = content[:12000]
     return f"""
 以下是当前对话必须依据的公告原文。后续回答只能基于这份原文和对话历史。
 
