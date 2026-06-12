@@ -96,7 +96,7 @@ class OpenAICompatibleProvider(LLMProvider):
             ],
             response_format={"type": "json_object"},
             temperature=0.2,
-            max_tokens=1400,
+            **self._token_limit_param(),
         )
         return normalize_analysis(json.loads(response.choices[0].message.content or "{}"))
 
@@ -133,9 +133,14 @@ class OpenAICompatibleProvider(LLMProvider):
             model=self.model,
             messages=messages,
             temperature=0.2,
-            max_tokens=1400,
+            **self._token_limit_param(),
         )
         return response.choices[0].message.content or ""
+
+    def _token_limit_param(self) -> dict[str, int]:
+        if self.provider_name == "openai":
+            return {"max_completion_tokens": 1400}
+        return {"max_tokens": 1400}
 
 
 def provider_from_settings(settings: dict[str, Any]) -> LLMProvider:
