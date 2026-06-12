@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import logging
 import os
 import threading
 
@@ -61,6 +62,7 @@ from .services.settings import get_model_settings, public_model_settings, save_m
 
 
 app = FastAPI(title="StockAI", version="0.1.0")
+logger = logging.getLogger("stockai")
 analysis_job = {
     "running": False,
     "cancel_requested": False,
@@ -254,6 +256,7 @@ def analyze_announcement(announcement_id: int) -> AnalysisResult:
             raise HTTPException(status_code=500, detail="Analysis was not saved")
         return AnalysisResult(**saved)
     except Exception as exc:
+        logger.exception("Manual analysis failed for announcement_id=%s", announcement_id)
         mark_analysis_status(announcement_id, "failed", str(exc))
         raise HTTPException(status_code=500, detail=str(exc)) from exc
 
@@ -340,6 +343,7 @@ def _analyze_one(announcement: dict, provider) -> bool:
         save_analysis(announcement_id, provider.provider_name, provider.model, analysis)
         return True
     except Exception as exc:
+        logger.exception("Auto analysis failed for announcement_id=%s", announcement_id)
         mark_analysis_status(announcement_id, "failed", str(exc))
         return False
 
@@ -379,6 +383,7 @@ def chat_with_announcement(announcement_id: int, payload: ChatRequest) -> ChatRe
             model=provider.model,
         )
     except Exception as exc:
+        logger.exception("Chat failed for announcement_id=%s", announcement_id)
         update_parse_result(announcement_id, "parse_failed", None, str(exc))
         raise HTTPException(status_code=500, detail=str(exc)) from exc
 
@@ -402,7 +407,6 @@ def run_analysis(payload: AnalysisRunRequest) -> AnalysisRunResponse:
             analyzed += 1
         else:
             failed += 1
-            mark_analysis_status(announcement_id, "failed", str(exc))
     return AnalysisRunResponse(requested=len(candidates), analyzed=analyzed, failed=failed)
 
 
