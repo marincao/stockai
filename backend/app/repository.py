@@ -133,6 +133,19 @@ def get_announcement(announcement_id: int) -> dict[str, Any] | None:
     return _deserialize_announcement(data) if data else None
 
 
+def get_announcements_by_ids(announcement_ids: list[int]) -> list[dict[str, Any]]:
+    if not announcement_ids:
+        return []
+    placeholders = ",".join("?" for _ in announcement_ids)
+    with get_connection() as conn:
+        rows = conn.execute(
+            f"SELECT * FROM announcements WHERE id IN ({placeholders})",
+            announcement_ids,
+        ).fetchall()
+    by_id = {row["id"]: _deserialize_announcement(row_to_dict(row) or {}) for row in rows}
+    return [by_id[announcement_id] for announcement_id in announcement_ids if announcement_id in by_id]
+
+
 def update_parse_result(announcement_id: int, status: str, content: str | None, error_message: str | None = None) -> None:
     with get_connection() as conn:
         conn.execute(

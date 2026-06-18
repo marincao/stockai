@@ -95,6 +95,7 @@ class AnnouncementDetail(Announcement):
 class AnalysisRunRequest(BaseModel):
     limit: int = Field(default=500, ge=1, le=5000)
     date: str | None = Field(default=None, pattern=r"^\d{8}$")
+    announcement_ids: list[int] | None = None
 
 
 class AnalysisRunResponse(BaseModel):
@@ -193,3 +194,8 @@ class PublicModelSettings(BaseModel):
     model: str
     base_url: str | None = None
     has_api_key: bool
+
+
+class AnalysisPromptSettings(BaseModel):
+    system_prompt: str = Field(min_length=1, max_length=4000)
+    user_instruction: str = Field(min_length=1, max_length=4000)

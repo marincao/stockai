@@ -9,8 +9,12 @@ from typing import Any
 OPENAI_TIMEOUT_SECONDS = float(os.getenv("OPENAI_TIMEOUT_SECONDS", "60"))
 OPENAI_MAX_RETRIES = int(os.getenv("OPENAI_MAX_RETRIES", "1"))
 
-SYSTEM_PROMPT = """你是一个谨慎的A股公告研究助手。请只基于公告内容输出结构化研究提醒。
+DEFAULT_ANALYSIS_SYSTEM_PROMPT = """你是一个谨慎的A股公告研究助手。请只基于公告内容输出结构化研究提醒。
 不要给出买入或卖出指令。输出必须是JSON。"""
+
+DEFAULT_ANALYSIS_USER_INSTRUCTION = """请基于公告正文，输出结构化研究提醒。
+重点提炼：关键事实、涉及金额/比例/时间点、直接影响、风险点、待验证线索和下一步观察信号。
+action_suggestion 必须给出“继续关注”或“不需要继续关注”的明确结论，但不要给买入或卖出指令。"""
 
 
 class LLMProvider(ABC):
@@ -18,7 +22,7 @@ class LLMProvider(ABC):
     model: str
 
     @abstractmethod
-    def analyze(self, announcement: dict[str, Any], content: str) -> dict[str, Any]:
+    def analyze(self, announcement: dict[str, Any], content: str, prompt_settings: dict[str, Any] | None = None) -> dict[str, Any]:
         raise NotImplementedError
 
     @abstractmethod
@@ -34,7 +38,7 @@ class MockProvider(LLMProvider):
     provider_name = "mock"
     model = "mock-free-test"
 
-    def analyze(self, announcement: dict[str, Any], content: str) -> dict[str, Any]:
+    def analyze(self, announcement: dict[str, Any], content: str, prompt_settings: dict[str, Any] | None = None) -> dict[str, Any]:
         title = announcement["title"]
         sentiment = "neutral"
         if any(word in title for word in ["回购", "增持", "中标", "重大合同", "增长"]):
@@ -79,7 +83,7 @@ class OpenAICompatibleProvider(LLMProvider):
         self.api_key = api_key
         self.base_url = base_url
 
-    def analyze(self, announcement: dict[str, Any], content: str) -> dict[str, Any]:
+    def analyze(self, announcement: dict[str, Any], content: str, prompt_settings: dict[str, Any] | None = None) -> dict[str, Any]:
         from openai import OpenAI
 
         client = OpenAI(
@@ -91,8 +95,8 @@ class OpenAICompatibleProvider(LLMProvider):
         response = client.chat.completions.create(
             model=self.model,
             messages=[
-                {"role": "system", "content": SYSTEM_PROMPT},
-                {"role": "user", "content": build_user_prompt(announcement, content)},
+                {"role": "system", "content": analysis_system_prompt(prompt_settings)},
+                {"role": "user", "content": build_user_prompt(announcement, content, prompt_settings)},
             ],
             response_format={"type": "json_object"},
             temperature=0.2,
@@ -159,9 +163,20 @@ def provider_from_settings(settings: dict[str, Any]) -> LLMProvider:
     raise ValueError(f"Unsupported provider: {provider}")
 
 
-def build_user_prompt(announcement: dict[str, Any], content: str) -> str:
+def analysis_system_prompt(prompt_settings: dict[str, Any] | None = None) -> str:
+    if not prompt_settings:
+        return DEFAULT_ANALYSIS_SYSTEM_PROMPT
+    return str(prompt_settings.get("system_prompt") or DEFAULT_ANALYSIS_SYSTEM_PROMPT)
+
+
+def build_user_prompt(announcement: dict[str, Any], content: str, prompt_settings: dict[str, Any] | None = None) -> str:
     trimmed = content[:12000]
+    instruction = DEFAULT_ANALYSIS_USER_INSTRUCTION
+    if prompt_settings:
+        instruction = str(prompt_settings.get("user_instruction") or DEFAULT_ANALYSIS_USER_INSTRUCTION)
     return f"""
+{instruction}
+
 公告元数据：
 - 股票代码：{announcement['code']}
 - 股票名称：{announcement['name']}

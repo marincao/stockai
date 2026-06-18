@@ -9,6 +9,7 @@ from fastapi.middleware.cors import CORSMiddleware
 
 from .db import init_db
 from .models import (
+    AnalysisPromptSettings,
     AnalysisResult,
     AnalysisJobStatus,
     AnalysisRunRequest,
@@ -42,6 +43,7 @@ from .repository import (
     get_analysis,
     get_analysis_candidates,
     get_announcement,
+    get_announcements_by_ids,
     get_screen_candidates,
     list_chat_messages,
     list_announcements,
@@ -58,7 +60,13 @@ from .services.akshare_client import fetch_announcements_by_date
 from .services.llm import normalize_analysis, normalize_screen, provider_from_settings
 from .services.parser import extract_announcement_text, should_reextract_content
 from .services.rules import screen_by_title
-from .services.settings import get_model_settings, public_model_settings, save_model_settings
+from .services.settings import (
+    get_analysis_prompt_settings,
+    get_model_settings,
+    public_model_settings,
+    save_analysis_prompt_settings,
+    save_model_settings,
+)
 
 
 app = FastAPI(title="StockAI", version="0.1.0")
@@ -85,7 +93,7 @@ def _cors_origins() -> list[str]:
 app.add_middleware(
     CORSMiddleware,
     allow_origins=_cors_origins(),
-    allow_origin_regex=os.getenv("CORS_ORIGIN_REGEX"),
+    allow_origin_regex=os.getenv("CORS_ORIGIN_REGEX", r"http://(localhost|127\.0\.0\.1):\d+"),
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
@@ -249,7 +257,7 @@ def analyze_announcement(announcement_id: int) -> AnalysisResult:
         if should_reextract_content(content):
             content = extract_announcement_text(announcement["url"])
             update_parse_result(announcement_id, "succeeded" if content else "parse_failed", content, None if content else "No text extracted")
-        analysis_data = normalize_analysis(provider.analyze(announcement, content or announcement["title"]))
+        analysis_data = normalize_analysis(provider.analyze(announcement, content or announcement["title"], get_analysis_prompt_settings()))
         save_analysis(announcement_id, provider.provider_name, provider.model, analysis_data)
         saved = get_analysis(announcement_id)
         if not saved:
@@ -277,7 +285,7 @@ def start_auto_analysis(payload: AnalysisRunRequest) -> AnalysisJobStatus:
                 "message": "分析任务启动中",
             }
         )
-    thread = threading.Thread(target=_analysis_worker, args=(payload.date, payload.limit), daemon=True)
+    thread = threading.Thread(target=_analysis_worker, args=(payload.date, payload.limit, payload.announcement_ids), daemon=True)
     thread.start()
     return AnalysisJobStatus(**analysis_job)
 
@@ -299,12 +307,14 @@ def auto_analysis_status() -> AnalysisJobStatus:
         return AnalysisJobStatus(**analysis_job)
 
 
-def _analysis_worker(target_date: str | None, limit: int) -> None:
+def _analysis_worker(target_date: str | None, limit: int, announcement_ids: list[int] | None = None) -> None:
     provider = provider_from_settings(get_model_settings())
-    candidates = get_analysis_candidates(limit, target_date)
+    prompt_settings = get_analysis_prompt_settings()
+    candidates = get_announcements_by_ids(announcement_ids) if announcement_ids else get_analysis_candidates(limit, target_date)
     with analysis_lock:
         analysis_job["requested"] = len(candidates)
-        analysis_job["message"] = f"待分析 {len(candidates)} 条 AI 关注公告"
+        source = "选中公告" if announcement_ids else "AI 关注公告"
+        analysis_job["message"] = f"待分析 {len(candidates)} 条 {source}"
     try:
         for announcement in candidates:
             with analysis_lock:
@@ -312,7 +322,7 @@ def _analysis_worker(target_date: str | None, limit: int) -> None:
                     analysis_job["message"] = "分析已取消"
                     break
                 analysis_job["current_id"] = announcement["id"]
-            ok = _analyze_one(announcement, provider)
+            ok = _analyze_one(announcement, provider, prompt_settings)
             with analysis_lock:
                 if ok:
                     analysis_job["analyzed"] += 1
@@ -327,7 +337,7 @@ def _analysis_worker(target_date: str | None, limit: int) -> None:
             analysis_job["current_id"] = None
 
 
-def _analyze_one(announcement: dict, provider) -> bool:
+def _analyze_one(announcement: dict, provider, prompt_settings: dict | None = None) -> bool:
     announcement_id = announcement["id"]
     mark_analysis_status(announcement_id, "running")
     try:
@@ -339,7 +349,7 @@ def _analyze_one(announcement: dict, provider) -> bool:
                 update_parse_result(announcement_id, "parse_failed", None, str(exc))
                 raise
             update_parse_result(announcement_id, "succeeded" if content else "parse_failed", content, None if content else "No text extracted")
-        analysis = normalize_analysis(provider.analyze(announcement, content or announcement["title"]))
+        analysis = normalize_analysis(provider.analyze(announcement, content or announcement["title"], prompt_settings))
         save_analysis(announcement_id, provider.provider_name, provider.model, analysis)
         return True
     except Exception as exc:
@@ -398,12 +408,13 @@ def chat_history(announcement_id: int) -> ChatHistoryResponse:
 @app.post("/api/analysis/run", response_model=AnalysisRunResponse)
 def run_analysis(payload: AnalysisRunRequest) -> AnalysisRunResponse:
     provider = provider_from_settings(get_model_settings())
-    candidates = get_analysis_candidates(payload.limit, payload.date)
+    prompt_settings = get_analysis_prompt_settings()
+    candidates = get_announcements_by_ids(payload.announcement_ids) if payload.announcement_ids else get_analysis_candidates(payload.limit, payload.date)
     analyzed = 0
     failed = 0
     for announcement in candidates:
         announcement_id = announcement["id"]
-        if _analyze_one(announcement, provider):
+        if _analyze_one(announcement, provider, prompt_settings):
             analyzed += 1
         else:
             failed += 1
@@ -427,3 +438,13 @@ def get_models() -> PublicModelSettings:
 def save_models(payload: ModelSettings) -> PublicModelSettings:
     save_model_settings(payload.model_dump())
     return PublicModelSettings(**public_model_settings())
+
+
+@app.get("/api/settings/analysis-prompt", response_model=AnalysisPromptSettings)
+def get_analysis_prompt() -> AnalysisPromptSettings:
+    return AnalysisPromptSettings(**get_analysis_prompt_settings())
+
+
+@app.post("/api/settings/analysis-prompt", response_model=AnalysisPromptSettings)
+def save_analysis_prompt(payload: AnalysisPromptSettings) -> AnalysisPromptSettings:
+    return AnalysisPromptSettings(**save_analysis_prompt_settings(payload.model_dump()))

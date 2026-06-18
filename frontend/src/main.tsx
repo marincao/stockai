@@ -3,6 +3,7 @@ import { createRoot } from "react-dom/client";
 import {
   Brain,
   CalendarDays,
+  CheckSquare,
   ChevronLeft,
   ChevronRight,
   Database,
@@ -141,6 +142,11 @@ type ModelSettingsState = {
   has_api_key?: boolean;
 };
 
+type AnalysisPromptSettings = {
+  system_prompt: string;
+  user_instruction: string;
+};
+
 function todayYmd() {
   const d = new Date();
   return `${d.getFullYear()}${String(d.getMonth() + 1).padStart(2, "0")}${String(d.getDate()).padStart(2, "0")}`;
@@ -197,6 +203,11 @@ function App() {
     base_url: "",
     api_key: "",
   });
+  const [analysisPrompt, setAnalysisPrompt] = useState<AnalysisPromptSettings>({
+    system_prompt: "",
+    user_instruction: "",
+  });
+  const [selectedIds, setSelectedIds] = useState<number[]>([]);
   const [loading, setLoading] = useState("");
   const [message, setMessage] = useState("");
 
@@ -244,6 +255,10 @@ function App() {
     });
   }
 
+  async function loadAnalysisPrompt() {
+    setAnalysisPrompt(await api<AnalysisPromptSettings>("/api/settings/analysis-prompt"));
+  }
+
   async function loadAnalysisJob() {
     setAnalysisJob(await api<AnalysisJobStatus>("/api/analysis/auto/status"));
   }
@@ -255,6 +270,7 @@ function App() {
   useEffect(() => {
     loadOverview().catch((error) => setMessage(error.message));
     loadSettings().catch((error) => setMessage(error.message));
+    loadAnalysisPrompt().catch((error) => setMessage(error.message));
     loadAnalysisJob().catch((error) => setMessage(error.message));
   }, []);
 
@@ -281,6 +297,7 @@ function App() {
     setAnalysis(null);
     setChatMessages([]);
     setChatMeta(null);
+    setSelectedIds([]);
   }, [aiOnly, announcementType, date, keyword]);
 
   async function fetchAnnouncements() {
@@ -321,10 +338,11 @@ function App() {
   async function startAutoAnalysis() {
     setLoading("autoAnalyze");
     try {
-      const limit = Math.min(Math.max(summary?.ai_tracking_announcements ?? 500, 500), 5000);
+      const hasSelected = selectedIds.length > 0;
+      const limit = hasSelected ? selectedIds.length : Math.min(Math.max(summary?.ai_tracking_announcements ?? 500, 500), 5000);
       const result = await api<AnalysisJobStatus>("/api/analysis/auto/start", {
         method: "POST",
-        body: JSON.stringify({ date, limit }),
+        body: JSON.stringify({ date, limit, announcement_ids: hasSelected ? selectedIds : null }),
       });
       setAnalysisJob(result);
       setMessage(result.message || "自动分析已启动");
@@ -348,6 +366,36 @@ function App() {
     } finally {
       setLoading("");
     }
+  }
+
+  async function analyzeOne(item: Announcement) {
+    setLoading(`analyze-${item.id}`);
+    try {
+      const result = await api<Analysis>(`/api/announcements/${item.id}/analyze`, { method: "POST" });
+      if (selected?.id === item.id) {
+        setAnalysis(result);
+        await refreshSelectedAnnouncement(item.id);
+      }
+      setMessage("分析完成");
+      await loadOverview();
+      await loadAnnouncements(false);
+    } catch (error) {
+      setMessage(error instanceof Error ? error.message : "分析失败");
+    } finally {
+      setLoading("");
+    }
+  }
+
+  function toggleSelectedId(id: number, checked: boolean) {
+    setSelectedIds((current) => (checked ? [...new Set([...current, id])] : current.filter((item) => item !== id)));
+  }
+
+  function togglePageSelection(checked: boolean) {
+    setSelectedIds((current) => {
+      const pageIds = data.items.map((item) => item.id);
+      if (checked) return [...new Set([...current, ...pageIds])];
+      return current.filter((id) => !pageIds.includes(id));
+    });
   }
 
   function savePromptPresets(next: PromptPreset[]) {
@@ -465,6 +513,22 @@ function App() {
     }
   }
 
+  async function saveAnalysisPrompt() {
+    setLoading("analysisPrompt");
+    try {
+      const result = await api<AnalysisPromptSettings>("/api/settings/analysis-prompt", {
+        method: "POST",
+        body: JSON.stringify(analysisPrompt),
+      });
+      setAnalysisPrompt(result);
+      setMessage("自动分析 Prompt 已保存");
+    } catch (error) {
+      setMessage(error instanceof Error ? error.message : "保存 Prompt 失败");
+    } finally {
+      setLoading("");
+    }
+  }
+
   async function cleanup(path: string, body?: object) {
     setLoading("cleanup");
     try {
@@ -486,6 +550,8 @@ function App() {
   }
 
   const totalPages = Math.max(1, Math.ceil(data.total / data.page_size));
+  const pageIds = data.items.map((item) => item.id);
+  const pageAllSelected = pageIds.length > 0 && pageIds.every((id) => selectedIds.includes(id));
 
   return (
     <main className="shell">
@@ -524,6 +590,27 @@ function App() {
           <button className="primary" onClick={saveSettings} disabled={loading === "settings"} title="保存模型配置">
             {loading === "settings" ? <Loader2 className="spin" size={18} /> : <Save size={18} />} 保存
           </button>
+          <div className="analysisPromptSettings">
+            <label>
+              自动分析 System Prompt
+              <textarea
+                value={analysisPrompt.system_prompt}
+                onChange={(event) => setAnalysisPrompt({ ...analysisPrompt, system_prompt: event.target.value })}
+                rows={3}
+              />
+            </label>
+            <label>
+              自动分析 User Instruction
+              <textarea
+                value={analysisPrompt.user_instruction}
+                onChange={(event) => setAnalysisPrompt({ ...analysisPrompt, user_instruction: event.target.value })}
+                rows={4}
+              />
+            </label>
+            <button className="primary" onClick={saveAnalysisPrompt} disabled={loading === "analysisPrompt"} title="保存自动分析 Prompt">
+              {loading === "analysisPrompt" ? <Loader2 className="spin" size={18} /> : <Save size={18} />} 保存 Prompt
+            </button>
+          </div>
         </section>
       )}
 
@@ -544,7 +631,7 @@ function App() {
           </button>
         ) : (
           <button onClick={startAutoAnalysis} disabled={loading === "autoAnalyze"} title="后台分析所有AI关注公告">
-            {loading === "autoAnalyze" ? <Loader2 className="spin" size={18} /> : <Play size={18} />} 自动分析
+            {loading === "autoAnalyze" ? <Loader2 className="spin" size={18} /> : <Play size={18} />} {selectedIds.length ? `分析已选 ${selectedIds.length}` : "自动分析"}
           </button>
         )}
         <label className="search">
@@ -593,20 +680,42 @@ function App() {
           </div>
           <div className="table">
             <div className="row head">
+              <span>
+                <input
+                  type="checkbox"
+                  checked={pageAllSelected}
+                  onChange={(event) => togglePageSelection(event.target.checked)}
+                  title="选择当前页"
+                />
+              </span>
               <span>代码</span>
               <span>名称</span>
               <span>标题</span>
               <span>类型</span>
               <span>分析</span>
+              <span>操作</span>
             </div>
             {data.items.map((item) => (
-              <button className={`row item ${selected?.id === item.id ? "selected" : ""}`} key={item.id} onClick={() => selectAnnouncement(item)}>
+              <div className={`row item ${selected?.id === item.id ? "selected" : ""}`} key={item.id}>
+                <span>
+                  <input
+                    type="checkbox"
+                    checked={selectedIds.includes(item.id)}
+                    onChange={(event) => toggleSelectedId(item.id, event.target.checked)}
+                    title="选择公告"
+                  />
+                </span>
                 <span>{item.code}</span>
                 <span>{item.name}</span>
-                <span className="titleText">{item.title}</span>
+                <button type="button" className="titleButton" onClick={() => selectAnnouncement(item)} title="查看公告详情">
+                  {item.title}
+                </button>
                 <span>{item.announcement_type}</span>
                 <span className={`pill ${item.analysis_status}`}>{item.analysis_status}</span>
-              </button>
+                <button type="button" onClick={() => analyzeOne(item)} disabled={loading === `analyze-${item.id}`} title="分析这篇公告">
+                  {loading === `analyze-${item.id}` ? <Loader2 className="spin" size={16} /> : <Play size={16} />} 分析
+                </button>
+              </div>
             ))}
           </div>
           <div className="pager">
@@ -627,6 +736,9 @@ function App() {
                   <h2>{selected.name} {selected.code}</h2>
                   <p>{selected.announcement_date} · {selected.announcement_type}</p>
                 </div>
+                <button type="button" onClick={() => analyzeOne(selected)} disabled={loading === `analyze-${selected.id}`} title="分析这篇公告">
+                  {loading === `analyze-${selected.id}` ? <Loader2 className="spin" size={16} /> : <Play size={16} />} 分析
+                </button>
               </div>
               <h3>{selected.title}</h3>
               <div className="tags">
