@@ -3,19 +3,20 @@ import { createRoot } from "react-dom/client";
 import {
   Brain,
   CalendarDays,
-  CheckSquare,
   ChevronLeft,
   ChevronRight,
   Database,
   Loader2,
   MessageSquare,
   Play,
+  Plus,
   RefreshCw,
   Save,
   Search,
   Settings,
   Square,
   Trash2,
+  X,
 } from "lucide-react";
 import "./styles.css";
 
@@ -54,6 +55,7 @@ type Announcement = {
   announcement_type: string;
   announcement_date: string;
   url: string;
+  source: string;
   is_important: boolean;
   matched_keywords: string[];
   ai_screen_status: string;
@@ -94,6 +96,8 @@ type Analysis = {
   announcement_id: number;
   provider: string;
   model: string;
+  output_format: string;
+  free_output: string;
   summary: string;
   sentiment: string;
   importance_score: number;
@@ -142,14 +146,26 @@ type ModelSettingsState = {
   has_api_key?: boolean;
 };
 
-type AnalysisPromptSettings = {
+type AnalysisPromptPreset = {
+  id: string;
+  title: string;
   system_prompt: string;
   user_instruction: string;
+  is_active: boolean;
 };
 
 function todayYmd() {
   const d = new Date();
   return `${d.getFullYear()}${String(d.getMonth() + 1).padStart(2, "0")}${String(d.getDate()).padStart(2, "0")}`;
+}
+
+function ymdToDateInput(value: string) {
+  if (!/^\d{8}$/.test(value)) return "";
+  return `${value.slice(0, 4)}-${value.slice(4, 6)}-${value.slice(6, 8)}`;
+}
+
+function dateInputToYmd(value: string) {
+  return value.replace(/-/g, "");
 }
 
 function loadPromptPresets(): PromptPreset[] {
@@ -178,6 +194,7 @@ async function api<T>(path: string, options?: RequestInit): Promise<T> {
 }
 
 function App() {
+  const [view, setView] = useState<"workspace" | "settings">("workspace");
   const [date, setDate] = useState(todayYmd());
   const [keyword, setKeyword] = useState("");
   const [announcementType, setAnnouncementType] = useState("");
@@ -192,21 +209,18 @@ function App() {
   const [chatQuestion, setChatQuestion] = useState("请基于公告原文，说明这条公告最重要的事实、风险和需要继续验证的问题。");
   const [chatMessages, setChatMessages] = useState<ChatMessage[]>([]);
   const [chatMeta, setChatMeta] = useState<ChatResponse | null>(null);
+  const [chatPromptOpen, setChatPromptOpen] = useState(false);
   const [promptPresets, setPromptPresets] = useState<PromptPreset[]>(loadPromptPresets);
   const [promptDraftId, setPromptDraftId] = useState("");
   const [promptDraftTitle, setPromptDraftTitle] = useState("");
   const [promptDraftContent, setPromptDraftContent] = useState("");
-  const [settingsOpen, setSettingsOpen] = useState(false);
   const [settings, setSettings] = useState<ModelSettingsState>({
     provider: "mock",
     model: "mock-free-test",
     base_url: "",
     api_key: "",
   });
-  const [analysisPrompt, setAnalysisPrompt] = useState<AnalysisPromptSettings>({
-    system_prompt: "",
-    user_instruction: "",
-  });
+  const [analysisPrompts, setAnalysisPrompts] = useState<AnalysisPromptPreset[]>([]);
   const [selectedIds, setSelectedIds] = useState<number[]>([]);
   const [loading, setLoading] = useState("");
   const [message, setMessage] = useState("");
@@ -255,8 +269,9 @@ function App() {
     });
   }
 
-  async function loadAnalysisPrompt() {
-    setAnalysisPrompt(await api<AnalysisPromptSettings>("/api/settings/analysis-prompt"));
+  async function loadAnalysisPrompts() {
+    const result = await api<{ items: AnalysisPromptPreset[] }>("/api/settings/analysis-prompts");
+    setAnalysisPrompts(result.items);
   }
 
   async function loadAnalysisJob() {
@@ -270,7 +285,7 @@ function App() {
   useEffect(() => {
     loadOverview().catch((error) => setMessage(error.message));
     loadSettings().catch((error) => setMessage(error.message));
-    loadAnalysisPrompt().catch((error) => setMessage(error.message));
+    loadAnalysisPrompts().catch((error) => setMessage(error.message));
     loadAnalysisJob().catch((error) => setMessage(error.message));
   }, []);
 
@@ -449,6 +464,7 @@ function App() {
       });
       setChatMeta(result);
       setChatQuestion("");
+      setChatPromptOpen(false);
       await loadChatHistory(selected.id);
       const detail = await api<AnnouncementDetail>(`/api/announcements/${selected.id}`);
       setSelected(detail);
@@ -513,20 +529,53 @@ function App() {
     }
   }
 
-  async function saveAnalysisPrompt() {
+  async function saveAnalysisPrompts(next = analysisPrompts) {
     setLoading("analysisPrompt");
     try {
-      const result = await api<AnalysisPromptSettings>("/api/settings/analysis-prompt", {
+      const result = await api<{ items: AnalysisPromptPreset[] }>("/api/settings/analysis-prompts", {
         method: "POST",
-        body: JSON.stringify(analysisPrompt),
+        body: JSON.stringify({ items: next }),
       });
-      setAnalysisPrompt(result);
+      setAnalysisPrompts(result.items);
       setMessage("自动分析 Prompt 已保存");
     } catch (error) {
       setMessage(error instanceof Error ? error.message : "保存 Prompt 失败");
     } finally {
       setLoading("");
     }
+  }
+
+  function updateAnalysisPrompt(id: string, patch: Partial<AnalysisPromptPreset>) {
+    setAnalysisPrompts((current) => current.map((item) => (item.id === id ? { ...item, ...patch } : item)));
+  }
+
+  function addAnalysisPrompt() {
+    const id = crypto.randomUUID();
+    const source = analysisPrompts.find((item) => item.is_active) ?? analysisPrompts[0];
+    const next = [
+      ...analysisPrompts,
+      {
+        id,
+        title: "新的分析 Prompt",
+        system_prompt: source?.system_prompt ?? "你是一个谨慎的A股公告研究助手。请只基于公告内容输出研究分析。",
+        user_instruction: source?.user_instruction ?? "请基于公告正文输出研究分析。",
+        is_active: analysisPrompts.length === 0,
+      },
+    ];
+    setAnalysisPrompts(next);
+  }
+
+  function activateAnalysisPrompt(id: string) {
+    setAnalysisPrompts((current) => current.map((item) => ({ ...item, is_active: item.id === id })));
+  }
+
+  function deleteAnalysisPrompt(id: string) {
+    setAnalysisPrompts((current) => {
+      if (current.length <= 1) return current;
+      const next = current.filter((item) => item.id !== id);
+      if (!next.some((item) => item.is_active)) next[0].is_active = true;
+      return next;
+    });
   }
 
   async function cleanup(path: string, body?: object) {
@@ -552,270 +601,287 @@ function App() {
   const totalPages = Math.max(1, Math.ceil(data.total / data.page_size));
   const pageIds = data.items.map((item) => item.id);
   const pageAllSelected = pageIds.length > 0 && pageIds.every((id) => selectedIds.includes(id));
+  const activeAnalysisPrompt = analysisPrompts.find((item) => item.is_active);
 
   return (
     <main className="shell">
       <header className="topbar">
-        <div>
+        <div className="brandBlock">
           <h1>StockAI</h1>
-          <p>临时公告工作台：保留最近 3 天，后台分析 AI 关注公告</p>
         </div>
-        <button onClick={() => setSettingsOpen(!settingsOpen)} title="模型设置">
-          <Settings size={18} /> 模型
-        </button>
+        <nav className="topNav">
+          <button className={view === "workspace" ? "navActive" : ""} onClick={() => setView("workspace")}>
+            <Database size={18} /> 工作台
+          </button>
+          <button className={view === "settings" ? "navActive" : ""} onClick={() => setView("settings")}>
+            <Settings size={18} /> 设置
+          </button>
+        </nav>
       </header>
 
-      {settingsOpen && (
-        <section className="settingsPane compactSettings">
-          <label>
-            Provider
-            <select value={settings.provider} onChange={(event) => setSettings({ ...settings, provider: event.target.value as ModelSettingsState["provider"] })}>
-              <option value="mock">mock/free-test</option>
-              <option value="openai">OpenAI API</option>
-              <option value="openai-compatible">OpenAI-compatible</option>
-            </select>
-          </label>
-          <label>
-            Model
-            <input value={settings.model} onChange={(event) => setSettings({ ...settings, model: event.target.value })} />
-          </label>
-          <label>
-            Base URL
-            <input value={settings.base_url} onChange={(event) => setSettings({ ...settings, base_url: event.target.value })} placeholder="http://127.0.0.1:11434/v1" />
-          </label>
-          <label>
-            API Key
-            <input value={settings.api_key} onChange={(event) => setSettings({ ...settings, api_key: event.target.value })} type="password" placeholder={settings.has_api_key ? "已保存，留空将清除" : "mock 可留空"} />
-          </label>
-          <button className="primary" onClick={saveSettings} disabled={loading === "settings"} title="保存模型配置">
-            {loading === "settings" ? <Loader2 className="spin" size={18} /> : <Save size={18} />} 保存
-          </button>
-          <div className="analysisPromptSettings">
-            <label>
-              自动分析 System Prompt
-              <textarea
-                value={analysisPrompt.system_prompt}
-                onChange={(event) => setAnalysisPrompt({ ...analysisPrompt, system_prompt: event.target.value })}
-                rows={3}
-              />
-            </label>
-            <label>
-              自动分析 User Instruction
-              <textarea
-                value={analysisPrompt.user_instruction}
-                onChange={(event) => setAnalysisPrompt({ ...analysisPrompt, user_instruction: event.target.value })}
-                rows={4}
-              />
-            </label>
-            <button className="primary" onClick={saveAnalysisPrompt} disabled={loading === "analysisPrompt"} title="保存自动分析 Prompt">
+      {view === "settings" ? (
+        <section className="settingsPage">
+          <div className="settingsHero">
+            <div>
+              <h2>设置</h2>
+              <p>当前启用：{activeAnalysisPrompt?.title ?? "未加载"}</p>
+            </div>
+            <button className="primary" onClick={() => saveAnalysisPrompts()} disabled={loading === "analysisPrompt"}>
               {loading === "analysisPrompt" ? <Loader2 className="spin" size={18} /> : <Save size={18} />} 保存 Prompt
             </button>
           </div>
+
+          <section className="settingsPane modelSettings">
+            <h3>模型配置</h3>
+            <div className="settingsGrid">
+              <label>
+                Provider
+                <select value={settings.provider} onChange={(event) => setSettings({ ...settings, provider: event.target.value as ModelSettingsState["provider"] })}>
+                  <option value="mock">mock/free-test</option>
+                  <option value="openai">OpenAI API</option>
+                  <option value="openai-compatible">OpenAI-compatible</option>
+                </select>
+              </label>
+              <label>
+                Model
+                <input value={settings.model} onChange={(event) => setSettings({ ...settings, model: event.target.value })} />
+              </label>
+              <label>
+                Base URL
+                <input value={settings.base_url} onChange={(event) => setSettings({ ...settings, base_url: event.target.value })} placeholder="http://127.0.0.1:11434/v1" />
+              </label>
+              <label>
+                API Key
+                <input value={settings.api_key} onChange={(event) => setSettings({ ...settings, api_key: event.target.value })} type="password" placeholder={settings.has_api_key ? "已保存，留空将清除" : "mock 可留空"} />
+              </label>
+            </div>
+            <button className="primary" onClick={saveSettings} disabled={loading === "settings"}>
+              {loading === "settings" ? <Loader2 className="spin" size={18} /> : <Save size={18} />} 保存模型
+            </button>
+          </section>
+
+          <section className="settingsPane promptSettings">
+            <div className="sectionHead">
+              <h3>自动分析 Prompt</h3>
+              <button onClick={addAnalysisPrompt}>
+                <Plus size={17} /> 新增
+              </button>
+            </div>
+            <div className="promptEditorGrid">
+              {analysisPrompts.map((prompt) => (
+                <article className={`promptEditor ${prompt.is_active ? "activePrompt" : ""}`} key={prompt.id}>
+                  <div className="promptEditorHead">
+                    <input value={prompt.title} onChange={(event) => updateAnalysisPrompt(prompt.id, { title: event.target.value })} />
+                    <button className={prompt.is_active ? "primary" : ""} onClick={() => activateAnalysisPrompt(prompt.id)}>
+                      {prompt.is_active ? "已启用" : "启用"}
+                    </button>
+                    <button onClick={() => deleteAnalysisPrompt(prompt.id)} disabled={analysisPrompts.length <= 1}>
+                      <Trash2 size={16} />
+                    </button>
+                  </div>
+                  <label>
+                    System Prompt
+                    <textarea value={prompt.system_prompt} onChange={(event) => updateAnalysisPrompt(prompt.id, { system_prompt: event.target.value })} rows={4} />
+                  </label>
+                  <label>
+                    User Instruction
+                    <textarea value={prompt.user_instruction} onChange={(event) => updateAnalysisPrompt(prompt.id, { user_instruction: event.target.value })} rows={5} />
+                  </label>
+                </article>
+              ))}
+            </div>
+          </section>
         </section>
+      ) : (
+        <>
+          <section className="workflowBar">
+            <label>
+              <CalendarDays size={17} />
+              <input type="date" value={ymdToDateInput(date)} onChange={(event) => setDate(dateInputToYmd(event.target.value))} />
+            </label>
+            <button onClick={fetchAnnouncements} disabled={loading === "fetch"}>
+              {loading === "fetch" ? <Loader2 className="spin" size={18} /> : <RefreshCw size={18} />} 抓取并初筛
+            </button>
+            <button onClick={screenAnnouncements} disabled={loading === "screen"}>
+              {loading === "screen" ? <Loader2 className="spin" size={18} /> : <Brain size={18} />} 重新初筛
+            </button>
+            {analysisJob?.running ? (
+              <button onClick={cancelAutoAnalysis} disabled={loading === "cancelAnalyze"}>
+                {loading === "cancelAnalyze" ? <Loader2 className="spin" size={18} /> : <Square size={18} />} 取消分析
+              </button>
+            ) : (
+              <button onClick={startAutoAnalysis} disabled={loading === "autoAnalyze"}>
+                {loading === "autoAnalyze" ? <Loader2 className="spin" size={18} /> : <Play size={18} />} {selectedIds.length ? `分析已选 ${selectedIds.length}` : "自动分析"}
+              </button>
+            )}
+            <label className="search">
+              <Search size={17} />
+              <input value={keyword} onChange={(event) => setKeyword(event.target.value)} placeholder="代码、名称、标题" />
+            </label>
+            <select value={announcementType} onChange={(event) => setAnnouncementType(event.target.value)}>
+              <option value="">全部类型</option>
+              {filterOptions.announcement_types.map((item) => <option key={item} value={item}>{item}</option>)}
+            </select>
+            <label className="check">
+              <input type="checkbox" checked={aiOnly} onChange={(event) => setAiOnly(event.target.checked)} />
+              只看AI关注
+            </label>
+          </section>
+
+          <section className="databaseBar">
+            <div>
+              <Database size={18} />
+              <span>公告 {summary?.total_announcements ?? 0}</span>
+              <span>AI关注 {summary?.ai_tracking_announcements ?? 0}</span>
+              <span>已分析 {summary?.analyzed_announcements ?? 0}</span>
+              <span>原文 {summary?.content_announcements ?? 0}</span>
+              <span>对话 {summary?.chat_messages ?? 0}</span>
+              <span>任务 {analysisJob?.message || "空闲"} {analysisJob?.requested ? `${analysisJob.analyzed}/${analysisJob.requested}` : ""}</span>
+            </div>
+            <button onClick={() => cleanup("/api/database/cleanup/untracked", { date })} disabled={loading === "cleanup"}>
+              <Trash2 size={16} /> 删未关注
+            </button>
+            <button onClick={() => cleanup("/api/database/cleanup/content")} disabled={loading === "cleanup"}>
+              <Trash2 size={16} /> 清原文
+            </button>
+            <button onClick={() => cleanup("/api/database/cleanup/old", { days: 3 })} disabled={loading === "cleanup"}>
+              <Trash2 size={16} /> 删3天前
+            </button>
+            <button onClick={() => cleanup("/api/database/cleanup/all")} disabled={loading === "cleanup"}>
+              <Trash2 size={16} /> 清空库
+            </button>
+          </section>
+
+          <section className="workspace">
+            <div className="tablePane">
+              <div className="summaryLine">
+                <span>{data.total} 条公告</span>
+                <span>第 {page} / {totalPages} 页</span>
+              </div>
+              <div className="table">
+                <div className="row head">
+                  <span><input type="checkbox" checked={pageAllSelected} onChange={(event) => togglePageSelection(event.target.checked)} /></span>
+                  <span>代码</span>
+                  <span>名称</span>
+                  <span>标题</span>
+                  <span>类型</span>
+                  <span>分析</span>
+                  <span>操作</span>
+                </div>
+                {data.items.map((item) => (
+                  <div className={`row item ${selected?.id === item.id ? "selected" : ""}`} key={item.id}>
+                    <span><input type="checkbox" checked={selectedIds.includes(item.id)} onChange={(event) => toggleSelectedId(item.id, event.target.checked)} /></span>
+                    <span>{item.code}</span>
+                    <span>{item.name}</span>
+                    <button type="button" className="titleButton" onClick={() => selectAnnouncement(item)}>{item.title}</button>
+                    <span>{item.announcement_type}</span>
+                    <span className={`pill ${item.analysis_status}`}>{item.analysis_status}</span>
+                    <button type="button" onClick={() => analyzeOne(item)} disabled={loading === `analyze-${item.id}`}>
+                      {loading === `analyze-${item.id}` ? <Loader2 className="spin" size={16} /> : <Play size={16} />} 分析
+                    </button>
+                  </div>
+                ))}
+              </div>
+              <div className="pager">
+                <button onClick={() => setPage(Math.max(1, page - 1))} disabled={page <= 1}><ChevronLeft size={18} /></button>
+                <button onClick={() => setPage(Math.min(totalPages, page + 1))} disabled={page >= totalPages}><ChevronRight size={18} /></button>
+              </div>
+            </div>
+
+            <aside className="detailPane">
+              {selected ? (
+                <>
+                  <div className="detailHead">
+                    <div>
+                      <h2>{selected.name} {selected.code}</h2>
+                      <p>{selected.announcement_date} · {selected.announcement_type}</p>
+                    </div>
+                    <button type="button" onClick={() => analyzeOne(selected)} disabled={loading === `analyze-${selected.id}`}>
+                      {loading === `analyze-${selected.id}` ? <Loader2 className="spin" size={16} /> : <Play size={16} />} 分析
+                    </button>
+                  </div>
+                  <h3>{selected.title}</h3>
+                  <div className="tags">
+                    {selected.ai_worth_tracking && <span className="tag important">AI关注 {selected.ai_importance_score}</span>}
+                    {selected.ai_event_type && <span className="tag">{selected.ai_event_type}</span>}
+                    <span className="tag">分析：{selected.analysis_status}</span>
+                    {selected.matched_keywords.map((item) => <span className="tag" key={item}>{item}</span>)}
+                  </div>
+                  {selected.ai_screen_reason && <p className="screenReason">{selected.ai_screen_reason}</p>}
+                  <a href={selected.url} target="_blank" rel="noreferrer">打开公告原文</a>
+                  <div className="statusLine">
+                    <span>原文：{selected.content_length || 0} 字</span>
+                    <span>解析状态：{selected.parse_status}</span>
+                  </div>
+                  {analysis ? <AnalysisView analysis={analysis} /> : <p className="empty">分析完成后会显示模型输出。</p>}
+
+                  <section className="chatBox">
+                    <div className="chatHeader">
+                      <h4><MessageSquare size={16} /> 和AI对话</h4>
+                      <button type="button" onClick={() => setChatPromptOpen(true)}>
+                        <Settings size={15} /> 快捷Prompt
+                      </button>
+                    </div>
+                    <div className="chatMessages">
+                      {chatMessages.length === 0 && <p className="empty">还没有对话。</p>}
+                      {chatMessages.map((item) => (
+                        <div className={`chatMessage ${item.role}`} key={item.id}>
+                          <strong>{item.role === "assistant" ? "AI" : "你"}</strong>
+                          <p>{item.content}</p>
+                        </div>
+                      ))}
+                    </div>
+                    <textarea value={chatQuestion} onChange={(event) => setChatQuestion(event.target.value)} rows={3} />
+                    <button className="primary" onClick={() => chatWithSelected()} disabled={loading === "chat"}>
+                      {loading === "chat" ? <Loader2 className="spin" size={18} /> : <MessageSquare size={18} />} 发送
+                    </button>
+                    {chatMeta && (
+                      <details className="chatEvidence">
+                        <summary>{chatMeta.provider} / {chatMeta.model} · 原文 {chatMeta.content_length} 字</summary>
+                        <pre>{chatMeta.content_preview}</pre>
+                      </details>
+                    )}
+                  </section>
+                </>
+              ) : (
+                <p className="empty">选择一条公告查看详情。</p>
+              )}
+            </aside>
+          </section>
+        </>
       )}
 
-      <section className="workflowBar">
-        <label>
-          <CalendarDays size={17} />
-          <input value={date} onChange={(event) => setDate(event.target.value)} maxLength={8} />
-        </label>
-        <button onClick={fetchAnnouncements} disabled={loading === "fetch"} title="抓取公告并同步初筛">
-          {loading === "fetch" ? <Loader2 className="spin" size={18} /> : <RefreshCw size={18} />} 抓取并初筛
-        </button>
-        <button onClick={screenAnnouncements} disabled={loading === "screen"} title="按当前规则重新初筛当前日期">
-          {loading === "screen" ? <Loader2 className="spin" size={18} /> : <Brain size={18} />} 重新初筛
-        </button>
-        {analysisJob?.running ? (
-          <button onClick={cancelAutoAnalysis} disabled={loading === "cancelAnalyze"} title="取消后台自动分析">
-            {loading === "cancelAnalyze" ? <Loader2 className="spin" size={18} /> : <Square size={18} />} 取消分析
-          </button>
-        ) : (
-          <button onClick={startAutoAnalysis} disabled={loading === "autoAnalyze"} title="后台分析所有AI关注公告">
-            {loading === "autoAnalyze" ? <Loader2 className="spin" size={18} /> : <Play size={18} />} {selectedIds.length ? `分析已选 ${selectedIds.length}` : "自动分析"}
-          </button>
-        )}
-        <label className="search">
-          <Search size={17} />
-          <input value={keyword} onChange={(event) => setKeyword(event.target.value)} placeholder="代码、名称、标题" />
-        </label>
-        <select value={announcementType} onChange={(event) => setAnnouncementType(event.target.value)} title="公告类型">
-          <option value="">全部类型</option>
-          {filterOptions.announcement_types.map((item) => <option key={item} value={item}>{item}</option>)}
-        </select>
-        <label className="check">
-          <input type="checkbox" checked={aiOnly} onChange={(event) => setAiOnly(event.target.checked)} />
-          只看AI关注
-        </label>
-      </section>
-
-      <section className="databaseBar">
-        <div>
-          <Database size={18} />
-          <span>公告 {summary?.total_announcements ?? 0}</span>
-          <span>AI关注 {summary?.ai_tracking_announcements ?? 0}</span>
-          <span>已分析 {summary?.analyzed_announcements ?? 0}</span>
-          <span>存原文 {summary?.content_announcements ?? 0}</span>
-          <span>对话 {summary?.chat_messages ?? 0}</span>
-          <span>任务 {analysisJob?.message || "空闲"} {analysisJob?.requested ? `${analysisJob.analyzed}/${analysisJob.requested}` : ""}</span>
-        </div>
-        <button onClick={() => cleanup("/api/database/cleanup/untracked", { date })} disabled={loading === "cleanup"} title="删除当前日期未被AI关注的公告">
-          <Trash2 size={16} /> 删未关注
-        </button>
-        <button onClick={() => cleanup("/api/database/cleanup/content")} disabled={loading === "cleanup"} title="清空已分析公告原文">
-          <Trash2 size={16} /> 清原文
-        </button>
-        <button onClick={() => cleanup("/api/database/cleanup/old", { days: 3 })} disabled={loading === "cleanup"} title="删除3天前公告">
-          <Trash2 size={16} /> 删3天前
-        </button>
-        <button onClick={() => cleanup("/api/database/cleanup/all")} disabled={loading === "cleanup"} title="清空全部公告、分析和对话">
-          <Trash2 size={16} /> 清空库
-        </button>
-      </section>
-
-      <section className="workspace">
-        <div className="tablePane">
-          <div className="summaryLine">
-            <span>{data.total} 条公告</span>
-            <span>第 {page} / {totalPages} 页</span>
-          </div>
-          <div className="table">
-            <div className="row head">
-              <span>
-                <input
-                  type="checkbox"
-                  checked={pageAllSelected}
-                  onChange={(event) => togglePageSelection(event.target.checked)}
-                  title="选择当前页"
-                />
-              </span>
-              <span>代码</span>
-              <span>名称</span>
-              <span>标题</span>
-              <span>类型</span>
-              <span>分析</span>
-              <span>操作</span>
+      {chatPromptOpen && (
+        <div className="modalLayer" role="dialog" aria-modal="true">
+          <div className="promptModal">
+            <div className="modalHead">
+              <h3>AI 对话 Prompt</h3>
+              <button onClick={() => setChatPromptOpen(false)}><X size={18} /></button>
             </div>
-            {data.items.map((item) => (
-              <div className={`row item ${selected?.id === item.id ? "selected" : ""}`} key={item.id}>
-                <span>
-                  <input
-                    type="checkbox"
-                    checked={selectedIds.includes(item.id)}
-                    onChange={(event) => toggleSelectedId(item.id, event.target.checked)}
-                    title="选择公告"
-                  />
-                </span>
-                <span>{item.code}</span>
-                <span>{item.name}</span>
-                <button type="button" className="titleButton" onClick={() => selectAnnouncement(item)} title="查看公告详情">
-                  {item.title}
-                </button>
-                <span>{item.announcement_type}</span>
-                <span className={`pill ${item.analysis_status}`}>{item.analysis_status}</span>
-                <button type="button" onClick={() => analyzeOne(item)} disabled={loading === `analyze-${item.id}`} title="分析这篇公告">
-                  {loading === `analyze-${item.id}` ? <Loader2 className="spin" size={16} /> : <Play size={16} />} 分析
-                </button>
-              </div>
-            ))}
-          </div>
-          <div className="pager">
-            <button onClick={() => setPage(Math.max(1, page - 1))} disabled={page <= 1} title="上一页">
-              <ChevronLeft size={18} />
-            </button>
-            <button onClick={() => setPage(Math.min(totalPages, page + 1))} disabled={page >= totalPages} title="下一页">
-              <ChevronRight size={18} />
-            </button>
+            <div className="promptQuickList">
+              {promptPresets.map((prompt) => (
+                <div className="promptItem" key={prompt.id}>
+                  <button type="button" onClick={() => chatWithSelected(prompt.content)}>{prompt.title}</button>
+                  <button type="button" onClick={() => editPrompt(prompt)}>编辑</button>
+                </div>
+              ))}
+            </div>
+            <label>
+              名称
+              <input value={promptDraftTitle} onChange={(event) => setPromptDraftTitle(event.target.value)} placeholder="例如：核查财务影响" />
+            </label>
+            <label>
+              内容
+              <textarea value={promptDraftContent} onChange={(event) => setPromptDraftContent(event.target.value)} rows={5} placeholder="输入要发送给 AI 的问题模板" />
+            </label>
+            <div className="promptActions">
+              <button type="button" onClick={savePromptDraft}><Save size={15} /> 保存</button>
+              <button type="button" onClick={deletePromptDraft} disabled={!promptDraftId}><Trash2 size={15} /> 删除</button>
+              <button type="button" onClick={resetPrompts}><RefreshCw size={15} /> 默认</button>
+            </div>
           </div>
         </div>
-
-        <aside className="detailPane">
-          {selected ? (
-            <>
-              <div className="detailHead">
-                <div>
-                  <h2>{selected.name} {selected.code}</h2>
-                  <p>{selected.announcement_date} · {selected.announcement_type}</p>
-                </div>
-                <button type="button" onClick={() => analyzeOne(selected)} disabled={loading === `analyze-${selected.id}`} title="分析这篇公告">
-                  {loading === `analyze-${selected.id}` ? <Loader2 className="spin" size={16} /> : <Play size={16} />} 分析
-                </button>
-              </div>
-              <h3>{selected.title}</h3>
-              <div className="tags">
-                {selected.ai_worth_tracking && <span className="tag important">AI关注 {selected.ai_importance_score}</span>}
-                {selected.ai_event_type && <span className="tag">{selected.ai_event_type}</span>}
-                <span className="tag">分析：{selected.analysis_status}</span>
-                {selected.matched_keywords.map((item) => <span className="tag" key={item}>{item}</span>)}
-              </div>
-              {selected.ai_screen_reason && <p className="screenReason">{selected.ai_screen_reason}</p>}
-              <a href={selected.url} target="_blank" rel="noreferrer">打开公告原文</a>
-              <div className="statusLine">
-                <span>原文：{selected.content_length || 0} 字</span>
-                <span>解析状态：{selected.parse_status}</span>
-              </div>
-              {analysis ? <AnalysisView analysis={analysis} /> : <p className="empty">自动分析完成后，这里会显示摘要、行动建议、风险提示和待验证线索。</p>}
-
-              <section className="chatBox">
-                <div className="chatHeader">
-                  <h4><MessageSquare size={16} /> 和AI对话</h4>
-                  <details className="promptMenu">
-                    <summary><Settings size={15} /> 快捷Prompt</summary>
-                    <div className="promptPanel">
-                      <div className="promptQuickList">
-                        {promptPresets.map((prompt) => (
-                          <div className="promptItem" key={prompt.id}>
-                            <button type="button" onClick={() => chatWithSelected(prompt.content)} title="直接发送这个 Prompt">
-                              {prompt.title}
-                            </button>
-                            <button type="button" onClick={() => editPrompt(prompt)} title="编辑这个 Prompt">
-                              编辑
-                            </button>
-                          </div>
-                        ))}
-                      </div>
-                      <label>
-                        名称
-                        <input value={promptDraftTitle} onChange={(event) => setPromptDraftTitle(event.target.value)} placeholder="例如：核查财务影响" />
-                      </label>
-                      <label>
-                        内容
-                        <textarea value={promptDraftContent} onChange={(event) => setPromptDraftContent(event.target.value)} rows={4} placeholder="输入要发送给 AI 的问题模板" />
-                      </label>
-                      <div className="promptActions">
-                        <button type="button" onClick={savePromptDraft}><Save size={15} /> 保存</button>
-                        <button type="button" onClick={deletePromptDraft} disabled={!promptDraftId}><Trash2 size={15} /> 删除</button>
-                        <button type="button" onClick={resetPrompts}><RefreshCw size={15} /> 默认</button>
-                      </div>
-                    </div>
-                  </details>
-                </div>
-                <div className="chatMessages">
-                  {chatMessages.length === 0 && <p className="empty">还没有对话。第一次提问会先读取公告原文。</p>}
-                  {chatMessages.map((item) => (
-                    <div className={`chatMessage ${item.role}`} key={item.id}>
-                      <strong>{item.role === "assistant" ? "AI" : "你"}</strong>
-                      <p>{item.content}</p>
-                    </div>
-                  ))}
-                </div>
-                <textarea value={chatQuestion} onChange={(event) => setChatQuestion(event.target.value)} rows={3} />
-                <button className="primary" onClick={() => chatWithSelected()} disabled={loading === "chat"} title="发送问题">
-                  {loading === "chat" ? <Loader2 className="spin" size={18} /> : <MessageSquare size={18} />}
-                  发送
-                </button>
-                {chatMeta && (
-                  <details className="chatEvidence">
-                    <summary>{chatMeta.provider} / {chatMeta.model} · 原文 {chatMeta.content_length} 字</summary>
-                    <pre>{chatMeta.content_preview}</pre>
-                  </details>
-                )}
-              </section>
-            </>
-          ) : (
-            <p className="empty">选择一条公告查看详情。</p>
-          )}
-        </aside>
-      </section>
+      )}
 
       {message && <div className="toast">{message}</div>}
     </main>
@@ -823,32 +889,15 @@ function App() {
 }
 
 function AnalysisView({ analysis }: { analysis: Analysis }) {
+  const output = analysis.free_output || analysis.summary;
   return (
     <div className="analysis">
       <div className="scoreLine">
-        <span className={`sentiment ${analysis.sentiment}`}>{analysis.sentiment}</span>
-        <span>重要性 {analysis.importance_score}</span>
-        <span>置信度 {Math.round(analysis.confidence * 100)}%</span>
+        <span>自由输出</span>
+        <span>{analysis.provider} / {analysis.model}</span>
       </div>
-      <p>{analysis.summary}</p>
-      {analysis.action_suggestion && <p className="actionSuggestion">{analysis.action_suggestion}</p>}
-      <List title="风险提示" items={analysis.risk_points} />
-      <List title="待验证假设" items={analysis.opportunities} />
-      <List title="下一步观察" items={analysis.watch_signals} />
-      <p className="reason">{analysis.reasoning_short}</p>
-      <p className="disclaimer">{analysis.not_investment_advice}</p>
+      <pre className="freeOutput">{output}</pre>
     </div>
-  );
-}
-
-function List({ title, items }: { title: string; items: string[] }) {
-  return (
-    <section className="listBlock">
-      <h4>{title}</h4>
-      <ul>
-        {items.map((item) => <li key={item}>{item}</li>)}
-      </ul>
-    </section>
   );
 }
 

@@ -120,6 +120,8 @@ class AnalysisResult(BaseModel):
     announcement_id: int
     provider: str
     model: str
+    output_format: str = "structured"
+    free_output: str = ""
     summary: str
     sentiment: str
     importance_score: int
@@ -199,3 +201,17 @@ class PublicModelSettings(BaseModel):
 class AnalysisPromptSettings(BaseModel):
     system_prompt: str = Field(min_length=1, max_length=4000)
     user_instruction: str = Field(min_length=1, max_length=4000)
+    free_output: bool = True
+
+
+class AnalysisPromptPreset(BaseModel):
+    id: str = Field(min_length=1, max_length=80)
+    title: str = Field(min_length=1, max_length=120)
+    system_prompt: str = Field(min_length=1, max_length=4000)
+    user_instruction: str = Field(min_length=1, max_length=4000)
+    free_output: bool = True
+    is_active: bool = False
+
+
+class AnalysisPromptPresetList(BaseModel):
+    items: list[AnalysisPromptPreset]

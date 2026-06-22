@@ -1,6 +1,5 @@
 from __future__ import annotations
 
-import json
 import os
 from abc import ABC, abstractmethod
 from typing import Any
@@ -9,12 +8,10 @@ from typing import Any
 OPENAI_TIMEOUT_SECONDS = float(os.getenv("OPENAI_TIMEOUT_SECONDS", "60"))
 OPENAI_MAX_RETRIES = int(os.getenv("OPENAI_MAX_RETRIES", "1"))
 
-DEFAULT_ANALYSIS_SYSTEM_PROMPT = """你是一个谨慎的A股公告研究助手。请只基于公告内容输出结构化研究提醒。
-不要给出买入或卖出指令。输出必须是JSON。"""
+DEFAULT_ANALYSIS_SYSTEM_PROMPT = """你是一个谨慎的A股公告研究助手。请只基于公告内容输出研究分析。
+不要给出买入或卖出指令。"""
 
-DEFAULT_ANALYSIS_USER_INSTRUCTION = """请基于公告正文，输出结构化研究提醒。
-重点提炼：关键事实、涉及金额/比例/时间点、直接影响、风险点、待验证线索和下一步观察信号。
-action_suggestion 必须给出“继续关注”或“不需要继续关注”的明确结论，但不要给买入或卖出指令。"""
+DEFAULT_ANALYSIS_USER_INSTRUCTION = "请基于公告正文输出研究分析。"
 
 
 class LLMProvider(ABC):
@@ -39,23 +36,12 @@ class MockProvider(LLMProvider):
     model = "mock-free-test"
 
     def analyze(self, announcement: dict[str, Any], content: str, prompt_settings: dict[str, Any] | None = None) -> dict[str, Any]:
-        title = announcement["title"]
-        sentiment = "neutral"
-        if any(word in title for word in ["回购", "增持", "中标", "重大合同", "增长"]):
-            sentiment = "positive"
-        if any(word in title for word in ["风险", "减持", "处罚", "诉讼", "退市"]):
-            sentiment = "negative"
         return {
-            "summary": f"测试模型摘要：{announcement['name']}发布《{title}》，当前原文长度约 {len(content)} 字。",
-            "sentiment": sentiment,
-            "importance_score": 65 if announcement.get("is_important") else 35,
-            "risk_points": ["mock 模型只用于流程测试", "正式判断需要切换到 Ollama/OpenAI 等真实模型"],
-            "opportunities": ["可作为研究清单候选项", "适合继续查看财务和行业背景"],
-            "watch_signals": ["公告后首个交易日成交量变化", "公司后续补充公告"],
-            "action_suggestion": "mock 建议：只作为流程测试。真实使用时请切换到 Ollama/OpenAI，并结合公告原文复核。",
-            "confidence": 0.55,
-            "reasoning_short": "基于公告标题、类型和原文长度生成的本地测试结果。",
-            "not_investment_advice": "仅供个人研究提醒，不构成投资建议。",
+            "output_format": "free",
+            "free_output": (
+                f"测试模型自由输出：{announcement['name']}发布《{announcement['title']}》，"
+                f"原文长度约 {len(content)} 字。\n\n这是 mock 模型的自由文本结果。"
+            ),
         }
 
     def screen(self, announcement: dict[str, Any]) -> dict[str, Any]:
@@ -98,11 +84,13 @@ class OpenAICompatibleProvider(LLMProvider):
                 {"role": "system", "content": analysis_system_prompt(prompt_settings)},
                 {"role": "user", "content": build_user_prompt(announcement, content, prompt_settings)},
             ],
-            response_format={"type": "json_object"},
             temperature=0.2,
             **self._token_limit_param(),
         )
-        return normalize_analysis(json.loads(response.choices[0].message.content or "{}"))
+        return {
+            "output_format": "free",
+            "free_output": response.choices[0].message.content or "",
+        }
 
     def screen(self, announcement: dict[str, Any]) -> dict[str, Any]:
         return {
@@ -186,14 +174,6 @@ def build_user_prompt(announcement: dict[str, Any], content: str, prompt_setting
 
 公告正文：
 {trimmed}
-
-请输出JSON，字段固定为：
-summary, sentiment, importance_score, risk_points, opportunities, watch_signals,
-action_suggestion, confidence, reasoning_short, not_investment_advice。
-sentiment 只能是 positive、negative、neutral 或 mixed。
-importance_score 为 0-100 整数。
-confidence 为 0-1 小数。
-action_suggestion 必须给出明确结论，例如“继续关注：...”或“不需要继续关注：...”，但不要给买入/卖出指令。
 """
 
 
@@ -224,23 +204,18 @@ def normalize_screen(data: dict[str, Any]) -> dict[str, Any]:
 
 
 def normalize_analysis(data: dict[str, Any]) -> dict[str, Any]:
+    free_output = str(data.get("free_output", data.get("summary", "")))
     return {
-        "summary": str(data.get("summary", "")),
-        "sentiment": str(data.get("sentiment", "neutral")),
-        "importance_score": int(data.get("importance_score", 50)),
-        "risk_points": _as_list(data.get("risk_points")),
-        "opportunities": _as_list(data.get("opportunities")),
-        "watch_signals": _as_list(data.get("watch_signals")),
-        "action_suggestion": str(data.get("action_suggestion", "")),
-        "confidence": float(data.get("confidence", 0.5)),
-        "reasoning_short": str(data.get("reasoning_short", "")),
-        "not_investment_advice": str(data.get("not_investment_advice", "仅供个人研究提醒，不构成投资建议。")),
+        "output_format": "free",
+        "free_output": free_output,
+        "summary": free_output[:240],
+        "sentiment": "neutral",
+        "importance_score": 50,
+        "risk_points": [],
+        "opportunities": [],
+        "watch_signals": [],
+        "action_suggestion": "",
+        "confidence": 0.5,
+        "reasoning_short": "",
+        "not_investment_advice": "",
     }
-
-
-def _as_list(value: Any) -> list[str]:
-    if isinstance(value, list):
-        return [str(item) for item in value]
-    if value is None:
-        return []
-    return [str(value)]

@@ -334,6 +334,9 @@ def get_analysis(announcement_id: int) -> dict[str, Any] | None:
     for key in ("risk_points", "opportunities", "watch_signals"):
         data[key] = json.loads(data[key])
     data["action_suggestion"] = data.get("action_suggestion") or ""
+    raw_response = json.loads(data.get("raw_response") or "{}")
+    data["output_format"] = raw_response.get("output_format", "structured")
+    data["free_output"] = raw_response.get("free_output", "")
     return data
 
 

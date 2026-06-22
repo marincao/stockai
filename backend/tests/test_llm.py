@@ -15,5 +15,5 @@ def test_mock_provider_returns_required_shape() -> None:
         "公告正文",
     )
     normalized = normalize_analysis(result)
-    assert normalized["sentiment"] == "positive"
-    assert normalized["not_investment_advice"]
+    assert normalized["output_format"] == "free"
+    assert normalized["free_output"]

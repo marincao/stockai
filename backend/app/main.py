@@ -9,6 +9,7 @@ from fastapi.middleware.cors import CORSMiddleware
 
 from .db import init_db
 from .models import (
+    AnalysisPromptPresetList,
     AnalysisPromptSettings,
     AnalysisResult,
     AnalysisJobStatus,
@@ -62,8 +63,10 @@ from .services.parser import extract_announcement_text, should_reextract_content
 from .services.rules import screen_by_title
 from .services.settings import (
     get_analysis_prompt_settings,
+    get_analysis_prompt_presets,
     get_model_settings,
     public_model_settings,
+    save_analysis_prompt_presets,
     save_analysis_prompt_settings,
     save_model_settings,
 )
@@ -448,3 +451,13 @@ def get_analysis_prompt() -> AnalysisPromptSettings:
 @app.post("/api/settings/analysis-prompt", response_model=AnalysisPromptSettings)
 def save_analysis_prompt(payload: AnalysisPromptSettings) -> AnalysisPromptSettings:
     return AnalysisPromptSettings(**save_analysis_prompt_settings(payload.model_dump()))
+
+
+@app.get("/api/settings/analysis-prompts", response_model=AnalysisPromptPresetList)
+def get_analysis_prompts() -> AnalysisPromptPresetList:
+    return AnalysisPromptPresetList(**get_analysis_prompt_presets())
+
+
+@app.post("/api/settings/analysis-prompts", response_model=AnalysisPromptPresetList)
+def save_analysis_prompts(payload: AnalysisPromptPresetList) -> AnalysisPromptPresetList:
+    return AnalysisPromptPresetList(**save_analysis_prompt_presets(payload.model_dump()))
