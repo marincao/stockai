@@ -630,11 +630,24 @@ p {
 }
 
 .researchHero {
+  align-items: center;
   background: linear-gradient(120deg, #ffffff 0%, #f0f7f6 100%);
   border: 1px solid #d7e0e4;
   border-radius: 8px;
   box-shadow: 0 18px 42px rgba(35, 54, 64, 0.07);
   padding: 22px 24px;
+  display: flex;
+  gap: 20px;
+  justify-content: space-between;
+}
+
+.researchActions,
+.reportItemActions,
+.reportAnalysisHead {
+  align-items: center;
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
 }
 
 .researchEyebrow {
@@ -707,12 +720,43 @@ p {
   width: 100%;
 }
 
-.reportShelfItem:hover:not(:disabled),
+.reportShelfItem:hover,
 .reportShelfItem.selected {
   background: #edf8f6;
   border-color: #d8ebe8;
   box-shadow: inset 3px 0 0 #16807a;
   transform: none;
+}
+
+.reportSelect {
+  background: transparent;
+  border: 0;
+  border-radius: 0;
+  box-shadow: none;
+  display: grid;
+  gap: 12px;
+  grid-column: 1 / -1;
+  grid-template-columns: 30px minmax(0, 1fr);
+  height: auto;
+  justify-content: stretch;
+  min-width: 0;
+  padding: 0;
+  text-align: left;
+}
+
+.reportSelect:hover:not(:disabled) {
+  border: 0;
+  box-shadow: none;
+  transform: none;
+}
+
+.reportItemActions {
+  grid-column: 2;
+}
+
+.reportItemActions button {
+  min-height: 30px;
+  padding: 0 8px;
 }
 
 .reportIndex {
@@ -782,6 +826,38 @@ p {
   overflow-wrap: anywhere;
 }
 
+.reportAnalysis {
+  border-top: 1px solid #dfe8ea;
+  display: grid;
+  gap: 12px;
+  margin-top: 32px;
+  padding-top: 22px;
+}
+
+.reportAnalysisHead {
+  justify-content: space-between;
+}
+
+.reportAnalysis small,
+.researchJob {
+  color: #62717a;
+}
+
+.analysisOutput {
+  background: #f2f7f6;
+  border-left: 3px solid #16807a;
+  line-height: 1.75;
+  padding: 14px 16px;
+  white-space: pre-wrap;
+}
+
+.researchJob {
+  background: #ffffff;
+  border: 1px solid #d7e0e4;
+  border-radius: 8px;
+  padding: 10px 14px;
+}
+
 .reportEmpty {
   align-items: center;
   color: #73828a;
@@ -812,7 +888,8 @@ p {
 
 @media (max-width: 980px) {
   .topbar,
-  .settingsHero {
+  .settingsHero,
+  .researchHero {
     align-items: stretch;
     flex-direction: column;
   }

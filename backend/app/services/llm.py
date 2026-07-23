@@ -162,6 +162,17 @@ def build_user_prompt(announcement: dict[str, Any], content: str, prompt_setting
     instruction = DEFAULT_ANALYSIS_USER_INSTRUCTION
     if prompt_settings:
         instruction = str(prompt_settings.get("user_instruction") or DEFAULT_ANALYSIS_USER_INSTRUCTION)
+    if announcement.get("document_type") == "research_report":
+        return f"""
+{instruction}
+
+研究报告元数据：
+- 报告名称：{announcement['title']}
+- 来源：{announcement['source']}
+
+报告译文：
+{trimmed}
+"""
     return f"""
 {instruction}
 

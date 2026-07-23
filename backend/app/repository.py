@@ -390,6 +390,11 @@ def upsert_research_report(report_name: str, translated_text: str, source: str =
                 """
                 UPDATE research_reports
                 SET translated_text = ?,
+                    analysis_status = 'pending',
+                    analysis_output = NULL,
+                    analysis_provider = NULL,
+                    analysis_model = NULL,
+                    analysis_error = NULL,
                     updated_at = CURRENT_TIMESTAMP
                 WHERE id = ?
                 """,
@@ -411,7 +416,7 @@ def list_research_reports() -> tuple[list[dict[str, Any]], int]:
     with get_connection() as conn:
         rows = conn.execute(
             """
-            SELECT id, report_name, source, created_at, updated_at
+            SELECT id, report_name, source, created_at, updated_at, analysis_status
             FROM research_reports
             ORDER BY updated_at DESC, id DESC
             """
@@ -427,6 +432,71 @@ def get_research_report(report_id: int) -> dict[str, Any] | None:
             (report_id,),
         ).fetchone()
     return row_to_dict(row)
+
+
+def get_research_reports_by_ids(report_ids: list[int]) -> list[dict[str, Any]]:
+    if not report_ids:
+        return []
+    placeholders = ",".join("?" for _ in report_ids)
+    with get_connection() as conn:
+        rows = conn.execute(
+            f"SELECT * FROM research_reports WHERE id IN ({placeholders})",
+            report_ids,
+        ).fetchall()
+    by_id = {int(row["id"]): row_to_dict(row) or {} for row in rows}
+    return [by_id[report_id] for report_id in report_ids if report_id in by_id]
+
+
+def get_research_analysis_candidates(limit: int) -> list[dict[str, Any]]:
+    with get_connection() as conn:
+        rows = conn.execute(
+            """
+            SELECT * FROM research_reports
+            WHERE analysis_status IN ('pending', 'failed')
+            ORDER BY updated_at DESC, id DESC
+            LIMIT ?
+            """,
+            (limit,),
+        ).fetchall()
+    return [row_to_dict(row) or {} for row in rows]
+
+
+def mark_research_analysis_status(report_id: int, status: str, error: str | None = None) -> None:
+    with get_connection() as conn:
+        conn.execute(
+            """
+            UPDATE research_reports
+            SET analysis_status = ?, analysis_error = ?, updated_at = CURRENT_TIMESTAMP
+            WHERE id = ?
+            """,
+            (status, error, report_id),
+        )
+
+
+def save_research_analysis(report_id: int, provider: str, model: str, output: str) -> None:
+    with get_connection() as conn:
+        conn.execute(
+            """
+            UPDATE research_reports
+            SET analysis_status = 'succeeded', analysis_output = ?,
+                analysis_provider = ?, analysis_model = ?, analysis_error = NULL,
+                updated_at = CURRENT_TIMESTAMP
+            WHERE id = ?
+            """,
+            (output, provider, model, report_id),
+        )
+
+
+def delete_research_report(report_id: int) -> bool:
+    with get_connection() as conn:
+        cursor = conn.execute("DELETE FROM research_reports WHERE id = ?", (report_id,))
+        return cursor.rowcount > 0
+
+
+def delete_all_research_reports() -> int:
+    with get_connection() as conn:
+        cursor = conn.execute("DELETE FROM research_reports")
+        return int(cursor.rowcount)
 
 
 def cleanup_old_announcements(days: int = 3) -> int:

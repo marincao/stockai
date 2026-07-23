@@ -181,6 +181,7 @@ class ResearchReportSummary(BaseModel):
     source: str
     created_at: str
     updated_at: str
+    analysis_status: str = "pending"
 
 
 class ResearchReportListResponse(BaseModel):
@@ -190,6 +191,15 @@ class ResearchReportListResponse(BaseModel):
 
 class ResearchReportDetail(ResearchReportSummary):
     translated_text: str
+    analysis_output: str | None = None
+    analysis_provider: str | None = None
+    analysis_model: str | None = None
+    analysis_error: str | None = None
+
+
+class ResearchReportAnalysisRunRequest(BaseModel):
+    limit: int = Field(default=500, ge=1, le=5000)
+    report_ids: list[int] | None = None
 
 
 class CleanupOldRequest(BaseModel):

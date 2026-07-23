@@ -130,6 +130,11 @@ def init_db() -> None:
             "ALTER TABLE announcements ADD COLUMN ai_event_type TEXT",
             "ALTER TABLE announcements ADD COLUMN ai_screen_reason TEXT",
             "ALTER TABLE analyses ADD COLUMN action_suggestion TEXT NOT NULL DEFAULT ''",
+            "ALTER TABLE research_reports ADD COLUMN analysis_status TEXT NOT NULL DEFAULT 'pending'",
+            "ALTER TABLE research_reports ADD COLUMN analysis_output TEXT",
+            "ALTER TABLE research_reports ADD COLUMN analysis_provider TEXT",
+            "ALTER TABLE research_reports ADD COLUMN analysis_model TEXT",
+            "ALTER TABLE research_reports ADD COLUMN analysis_error TEXT",
         ]:
             try:
                 conn.execute(column_sql)

@@ -161,10 +161,15 @@ type ResearchReportSummary = {
   source: string;
   created_at: string;
   updated_at: string;
+  analysis_status: string;
 };
 
 type ResearchReportDetail = ResearchReportSummary & {
   translated_text: string;
+  analysis_output?: string | null;
+  analysis_provider?: string | null;
+  analysis_model?: string | null;
+  analysis_error?: string | null;
 };
 
 type ResearchReportResponse = {
@@ -928,7 +933,9 @@ function ResearchReportsView() {
   const [reports, setReports] = useState<ResearchReportResponse>({ items: [], total: 0 });
   const [selected, setSelected] = useState<ResearchReportDetail | null>(null);
   const [loading, setLoading] = useState(true);
+  const [action, setAction] = useState("");
   const [error, setError] = useState("");
+  const [job, setJob] = useState<AnalysisJobStatus | null>(null);
 
   async function selectReport(report: ResearchReportSummary) {
     setError("");
@@ -939,20 +946,102 @@ function ResearchReportsView() {
     }
   }
 
-  useEffect(() => {
-    async function loadReports() {
-      try {
-        const result = await api<ResearchReportResponse>("/api/research-reports");
-        setReports(result);
-        if (result.items.length) await selectReport(result.items[0]);
-      } catch (requestError) {
-        setError(requestError instanceof Error ? requestError.message : "研报列表加载失败");
-      } finally {
-        setLoading(false);
-      }
+  async function loadReports(selectFirst = false) {
+    setLoading(true);
+    setError("");
+    try {
+      const result = await api<ResearchReportResponse>("/api/research-reports");
+      setReports(result);
+      const current = selected && result.items.find((item) => item.id === selected.id);
+      if (current) await selectReport(current);
+      else if (selectFirst && result.items.length) await selectReport(result.items[0]);
+      else if (!result.items.length) setSelected(null);
+    } catch (requestError) {
+      setError(requestError instanceof Error ? requestError.message : "研报列表加载失败");
+    } finally {
+      setLoading(false);
     }
-    loadReports();
+  }
+
+  async function deleteReport(report: ResearchReportSummary) {
+    if (!window.confirm(`确定删除“${report.report_name}”吗？数据库中的记录也会被删除。`)) return;
+    setAction(`delete-${report.id}`);
+    try {
+      await api(`/api/research-reports/${report.id}`, { method: "DELETE" });
+      if (selected?.id === report.id) setSelected(null);
+      await loadReports(true);
+    } catch (requestError) {
+      setError(requestError instanceof Error ? requestError.message : "删除失败");
+    } finally {
+      setAction("");
+    }
+  }
+
+  async function clearReports() {
+    if (!window.confirm("确定删除全部研报吗？此操作会清空数据库中的全部研报记录。")) return;
+    setAction("clear");
+    try {
+      await api("/api/research-reports", { method: "DELETE" });
+      setSelected(null);
+      await loadReports();
+    } catch (requestError) {
+      setError(requestError instanceof Error ? requestError.message : "清空失败");
+    } finally {
+      setAction("");
+    }
+  }
+
+  async function analyzeReport(report: ResearchReportSummary) {
+    setAction(`analyze-${report.id}`);
+    setError("");
+    try {
+      const result = await api<ResearchReportDetail>(`/api/research-reports/${report.id}/analyze`, { method: "POST" });
+      setSelected(result);
+      await loadReports();
+    } catch (requestError) {
+      setError(requestError instanceof Error ? requestError.message : "AI 分析失败");
+    } finally {
+      setAction("");
+    }
+  }
+
+  async function startAutoAnalysis() {
+    setAction("auto");
+    try {
+      setJob(await api<AnalysisJobStatus>("/api/research-reports/analysis/auto/start", {
+        method: "POST",
+        body: JSON.stringify({ limit: Math.max(reports.total, 1) }),
+      }));
+    } catch (requestError) {
+      setError(requestError instanceof Error ? requestError.message : "自动分析启动失败");
+    } finally {
+      setAction("");
+    }
+  }
+
+  async function cancelAutoAnalysis() {
+    setJob(await api<AnalysisJobStatus>("/api/research-reports/analysis/auto/cancel", { method: "POST" }));
+  }
+
+  useEffect(() => {
+    async function initializeReports() {
+      try {
+        await loadReports(true);
+        setJob(await api<AnalysisJobStatus>("/api/research-reports/analysis/auto/status"));
+      } catch { /* loadReports already exposes request errors */ }
+    }
+    initializeReports();
   }, []);
+
+  useEffect(() => {
+    if (!job?.running) return;
+    const timer = window.setInterval(async () => {
+      const status = await api<AnalysisJobStatus>("/api/research-reports/analysis/auto/status");
+      setJob(status);
+      await loadReports();
+    }, 2500);
+    return () => window.clearInterval(timer);
+  }, [job?.running]);
 
   return (
     <section className="researchPage">
@@ -962,7 +1051,20 @@ function ResearchReportsView() {
           <h2>研报翻译</h2>
           <p>浏览自动抓取并翻译的研究报告，共 {reports.total} 篇。</p>
         </div>
+        <div className="researchActions">
+          <button onClick={() => loadReports(true)} disabled={loading}><RefreshCw className={loading ? "spin" : ""} size={17} /> 加载数据</button>
+          {job?.running ? (
+            <button onClick={cancelAutoAnalysis}><Square size={17} /> 取消分析</button>
+          ) : (
+            <button className="primary" onClick={startAutoAnalysis} disabled={!reports.total || action === "auto"}>
+              {action === "auto" ? <Loader2 className="spin" size={17} /> : <Brain size={17} />} 自动分析
+            </button>
+          )}
+          <button onClick={clearReports} disabled={!reports.total || action === "clear" || job?.running}><Trash2 size={17} /> 清空全部</button>
+        </div>
       </header>
+
+      {job?.message && <div className="researchJob">{job.message}{job.requested ? ` · ${job.analyzed}/${job.requested}，失败 ${job.failed}` : ""}</div>}
 
       {error && <div className="researchError">{error}</div>}
       <div className="researchWorkspace">
@@ -974,18 +1076,19 @@ function ResearchReportsView() {
           {loading && <p className="empty">正在载入研报…</p>}
           {!loading && reports.items.length === 0 && <p className="empty">尚未收到研报数据。</p>}
           {reports.items.map((report, index) => (
-            <button
-              type="button"
-              className={`reportShelfItem ${selected?.id === report.id ? "selected" : ""}`}
-              key={report.id}
-              onClick={() => selectReport(report)}
-            >
-              <span className="reportIndex">{String(index + 1).padStart(2, "0")}</span>
-              <span className="reportShelfCopy">
-                <strong>{report.report_name}</strong>
-                <small>{report.source} · {formatReportDate(report.updated_at)}</small>
-              </span>
-            </button>
+            <div className={`reportShelfItem ${selected?.id === report.id ? "selected" : ""}`} key={report.id}>
+              <button type="button" className="reportSelect" onClick={() => selectReport(report)}>
+                <span className="reportIndex">{String(index + 1).padStart(2, "0")}</span>
+                <span className="reportShelfCopy">
+                  <strong>{report.report_name}</strong>
+                  <small>{report.source} · {formatReportDate(report.updated_at)} · {report.analysis_status}</small>
+                </span>
+              </button>
+              <div className="reportItemActions">
+                <button title="AI 分析" onClick={() => analyzeReport(report)} disabled={action === `analyze-${report.id}`}><Brain size={14} /></button>
+                <button title="删除" onClick={() => deleteReport(report)} disabled={action === `delete-${report.id}` || job?.running}><Trash2 size={14} /></button>
+              </div>
+            </div>
           ))}
         </aside>
 
@@ -1000,6 +1103,21 @@ function ResearchReportsView() {
                 <time>{formatReportDate(selected.updated_at)}</time>
               </header>
               <div className="translatedText">{selected.translated_text}</div>
+              <section className="reportAnalysis">
+                <div className="reportAnalysisHead">
+                  <h4>AI 分析</h4>
+                  <button onClick={() => analyzeReport(selected)} disabled={action === `analyze-${selected.id}`}>
+                    {action === `analyze-${selected.id}` ? <Loader2 className="spin" size={16} /> : <Brain size={16} />} 分析这篇研报
+                  </button>
+                </div>
+                {selected.analysis_output ? (
+                  <>
+                    <small>{selected.analysis_provider} / {selected.analysis_model}</small>
+                    <div className="analysisOutput">{selected.analysis_output}</div>
+                  </>
+                ) : <p className="empty">状态：{selected.analysis_status}。分析完成后结果会显示在这里。</p>}
+                {selected.analysis_error && <p className="researchError">{selected.analysis_error}</p>}
+              </section>
             </>
           ) : (
             !loading && <div className="reportEmpty"><FileText size={34} /><p>从左侧选择一篇研报开始阅读。</p></div>

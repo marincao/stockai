@@ -34,6 +34,7 @@ from .models import (
     ResearchReportUploadResponse,
     ResearchReportDetail,
     ResearchReportListResponse,
+    ResearchReportAnalysisRunRequest,
     ScreenRunRequest,
     ScreenRunResponse,
 )
@@ -54,6 +55,12 @@ from .repository import (
     list_announcements,
     list_research_reports,
     get_research_report,
+    get_research_reports_by_ids,
+    get_research_analysis_candidates,
+    mark_research_analysis_status,
+    save_research_analysis,
+    delete_research_report,
+    delete_all_research_reports,
     mark_analysis_status,
     mark_screen_status,
     reset_screening,
@@ -91,6 +98,16 @@ analysis_job = {
     "message": "",
 }
 analysis_lock = threading.Lock()
+research_analysis_job = {
+    "running": False,
+    "cancel_requested": False,
+    "requested": 0,
+    "analyzed": 0,
+    "failed": 0,
+    "current_id": None,
+    "message": "",
+}
+research_analysis_lock = threading.Lock()
 
 
 def _cors_origins() -> list[str]:
@@ -141,12 +158,122 @@ def research_reports() -> ResearchReportListResponse:
     return ResearchReportListResponse(items=items, total=total)
 
 
+@app.delete("/api/research-reports", response_model=CleanupResponse)
+def clear_research_reports() -> CleanupResponse:
+    return CleanupResponse(affected=delete_all_research_reports())
+
+
+@app.post("/api/research-reports/analysis/auto/start", response_model=AnalysisJobStatus)
+def start_research_auto_analysis(payload: ResearchReportAnalysisRunRequest) -> AnalysisJobStatus:
+    with research_analysis_lock:
+        if research_analysis_job["running"]:
+            return AnalysisJobStatus(**research_analysis_job)
+        research_analysis_job.update(
+            running=True,
+            cancel_requested=False,
+            requested=0,
+            analyzed=0,
+            failed=0,
+            current_id=None,
+            message="研报分析任务启动中",
+        )
+    thread = threading.Thread(target=_research_analysis_worker, args=(payload.limit, payload.report_ids), daemon=True)
+    thread.start()
+    return AnalysisJobStatus(**research_analysis_job)
+
+
+@app.post("/api/research-reports/analysis/auto/cancel", response_model=AnalysisJobStatus)
+def cancel_research_auto_analysis() -> AnalysisJobStatus:
+    with research_analysis_lock:
+        research_analysis_job["cancel_requested"] = True
+        research_analysis_job["message"] = "已请求取消，当前研报分析完成后停止" if research_analysis_job["running"] else "当前没有运行中的研报分析任务"
+        return AnalysisJobStatus(**research_analysis_job)
+
+
+@app.get("/api/research-reports/analysis/auto/status", response_model=AnalysisJobStatus)
+def research_auto_analysis_status() -> AnalysisJobStatus:
+    with research_analysis_lock:
+        return AnalysisJobStatus(**research_analysis_job)
+
+
 @app.get("/api/research-reports/{report_id}", response_model=ResearchReportDetail)
 def research_report_detail(report_id: int) -> ResearchReportDetail:
     report = get_research_report(report_id)
     if not report:
         raise HTTPException(status_code=404, detail="Research report not found")
     return ResearchReportDetail(**report)
+
+
+@app.delete("/api/research-reports/{report_id}", response_model=CleanupResponse)
+def remove_research_report(report_id: int) -> CleanupResponse:
+    if not delete_research_report(report_id):
+        raise HTTPException(status_code=404, detail="Research report not found")
+    return CleanupResponse(affected=1)
+
+
+@app.post("/api/research-reports/{report_id}/analyze", response_model=ResearchReportDetail)
+def analyze_research_report(report_id: int) -> ResearchReportDetail:
+    report = get_research_report(report_id)
+    if not report:
+        raise HTTPException(status_code=404, detail="Research report not found")
+    provider = provider_from_settings(get_model_settings())
+    if not _analyze_research_report(report, provider, get_analysis_prompt_settings()):
+        failed = get_research_report(report_id)
+        raise HTTPException(status_code=500, detail=(failed or {}).get("analysis_error") or "Research report analysis failed")
+    saved = get_research_report(report_id)
+    if not saved:
+        raise HTTPException(status_code=500, detail="Analysis was not saved")
+    return ResearchReportDetail(**saved)
+
+
+def _research_analysis_worker(limit: int, report_ids: list[int] | None = None) -> None:
+    provider = provider_from_settings(get_model_settings())
+    prompt_settings = get_analysis_prompt_settings()
+    candidates = get_research_reports_by_ids(report_ids) if report_ids else get_research_analysis_candidates(limit)
+    with research_analysis_lock:
+        research_analysis_job["requested"] = len(candidates)
+        research_analysis_job["message"] = f"待分析 {len(candidates)} 篇研报"
+    try:
+        for report in candidates:
+            with research_analysis_lock:
+                if research_analysis_job["cancel_requested"]:
+                    research_analysis_job["message"] = "研报分析已取消"
+                    break
+                research_analysis_job["current_id"] = report["id"]
+            ok = _analyze_research_report(report, provider, prompt_settings)
+            with research_analysis_lock:
+                research_analysis_job["analyzed" if ok else "failed"] += 1
+        with research_analysis_lock:
+            if not research_analysis_job["cancel_requested"]:
+                research_analysis_job["message"] = "研报分析完成"
+    finally:
+        with research_analysis_lock:
+            research_analysis_job["running"] = False
+            research_analysis_job["current_id"] = None
+
+
+def _analyze_research_report(report: dict, provider, prompt_settings: dict) -> bool:
+    report_id = report["id"]
+    mark_research_analysis_status(report_id, "running")
+    document = {
+        "document_type": "research_report",
+        "title": report["report_name"],
+        "name": report["source"],
+        "source": report["source"],
+    }
+    report_prompt_settings = {
+        **prompt_settings,
+        "system_prompt": "你是一个严谨的投资研究报告分析助手。只能依据报告译文总结观点、证据、风险与待验证事项，不得编造信息或给出买卖指令。",
+        "user_instruction": "请分析这篇研究报告译文，提炼核心观点、关键数据与论据、主要风险，以及后续需要验证的问题。",
+    }
+    try:
+        result = normalize_analysis(provider.analyze(document, report["translated_text"], report_prompt_settings))
+        save_research_analysis(report_id, provider.provider_name, provider.model, result["free_output"])
+        return True
+    except Exception as exc:
+        logger.exception("Research report analysis failed for report_id=%s", report_id)
+        mark_research_analysis_status(report_id, "failed", str(exc))
+        return False
 
 
 @app.post("/api/fetch-announcements", response_model=FetchAnnouncementsResponse)
