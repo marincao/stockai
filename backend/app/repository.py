@@ -376,6 +376,37 @@ def save_chat_message(
         )
 
 
+def upsert_research_report(report_name: str, translated_text: str, source: str = "visionalpha") -> tuple[int, bool]:
+    with get_connection() as conn:
+        existing = conn.execute(
+            """
+            SELECT id FROM research_reports
+            WHERE report_name = ? AND source = ?
+            """,
+            (report_name, source),
+        ).fetchone()
+        if existing:
+            conn.execute(
+                """
+                UPDATE research_reports
+                SET translated_text = ?,
+                    updated_at = CURRENT_TIMESTAMP
+                WHERE id = ?
+                """,
+                (translated_text, existing["id"]),
+            )
+            return int(existing["id"]), False
+
+        cursor = conn.execute(
+            """
+            INSERT INTO research_reports(report_name, translated_text, source)
+            VALUES (?, ?, ?)
+            """,
+            (report_name, translated_text, source),
+        )
+        return int(cursor.lastrowid), True
+
+
 def cleanup_old_announcements(days: int = 3) -> int:
     cutoff = (date.today() - timedelta(days=days - 1)).strftime("%Y%m%d")
     with get_connection() as conn:

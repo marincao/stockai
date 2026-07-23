@@ -30,6 +30,8 @@ from .models import (
     ModelSettings,
     ParseResponse,
     PublicModelSettings,
+    ResearchReportUploadRequest,
+    ResearchReportUploadResponse,
     ScreenRunRequest,
     ScreenRunResponse,
 )
@@ -55,6 +57,7 @@ from .repository import (
     save_analysis,
     save_screen_result,
     update_parse_result,
+    upsert_research_report,
     upsert_announcements,
 )
 from .services.akshare_client import fetch_announcements_by_date
@@ -111,6 +114,21 @@ def on_startup() -> None:
 @app.get("/api/health")
 def health() -> dict[str, str]:
     return {"status": "ok"}
+
+
+@app.post("/api/research-reports", response_model=ResearchReportUploadResponse)
+def upload_research_report(payload: ResearchReportUploadRequest) -> ResearchReportUploadResponse:
+    report_id, inserted = upsert_research_report(
+        payload.report_name,
+        payload.translated_text,
+        payload.source,
+    )
+    return ResearchReportUploadResponse(
+        id=report_id,
+        report_name=payload.report_name,
+        source=payload.source,
+        inserted=inserted,
+    )
 
 
 @app.post("/api/fetch-announcements", response_model=FetchAnnouncementsResponse)

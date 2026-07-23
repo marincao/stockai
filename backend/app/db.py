@@ -104,6 +104,16 @@ def init_db() -> None:
 
             CREATE INDEX IF NOT EXISTS idx_chat_messages_announcement
                 ON chat_messages(announcement_id, created_at);
+
+            CREATE TABLE IF NOT EXISTS research_reports (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                report_name TEXT NOT NULL,
+                translated_text TEXT NOT NULL,
+                source TEXT NOT NULL DEFAULT 'visionalpha',
+                created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+                updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+                UNIQUE(report_name, source)
+            );
             """
         )
         conn.execute(

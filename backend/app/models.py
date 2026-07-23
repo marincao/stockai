@@ -162,6 +162,19 @@ class ChatHistoryResponse(BaseModel):
     items: list[ChatMessage]
 
 
+class ResearchReportUploadRequest(BaseModel):
+    report_name: str = Field(min_length=1, max_length=500)
+    translated_text: str = Field(min_length=1)
+    source: str = Field(default="visionalpha", min_length=1, max_length=80)
+
+
+class ResearchReportUploadResponse(BaseModel):
+    id: int
+    report_name: str
+    source: str
+    inserted: bool
+
+
 class CleanupOldRequest(BaseModel):
     days: int = Field(default=3, ge=1, le=30)
 
