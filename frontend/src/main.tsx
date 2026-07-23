@@ -6,6 +6,7 @@ import {
   ChevronLeft,
   ChevronRight,
   Database,
+  FileText,
   Loader2,
   MessageSquare,
   Play,
@@ -154,6 +155,23 @@ type AnalysisPromptPreset = {
   is_active: boolean;
 };
 
+type ResearchReportSummary = {
+  id: number;
+  report_name: string;
+  source: string;
+  created_at: string;
+  updated_at: string;
+};
+
+type ResearchReportDetail = ResearchReportSummary & {
+  translated_text: string;
+};
+
+type ResearchReportResponse = {
+  items: ResearchReportSummary[];
+  total: number;
+};
+
 function todayYmd() {
   const d = new Date();
   return `${d.getFullYear()}${String(d.getMonth() + 1).padStart(2, "0")}${String(d.getDate()).padStart(2, "0")}`;
@@ -194,7 +212,7 @@ async function api<T>(path: string, options?: RequestInit): Promise<T> {
 }
 
 function App() {
-  const [view, setView] = useState<"workspace" | "settings">("workspace");
+  const [view, setView] = useState<"workspace" | "research" | "settings">("workspace");
   const [date, setDate] = useState(todayYmd());
   const [keyword, setKeyword] = useState("");
   const [announcementType, setAnnouncementType] = useState("");
@@ -613,13 +631,18 @@ function App() {
           <button className={view === "workspace" ? "navActive" : ""} onClick={() => setView("workspace")}>
             <Database size={18} /> 工作台
           </button>
+          <button className={view === "research" ? "navActive" : ""} onClick={() => setView("research")}>
+            <FileText size={18} /> 研报翻译
+          </button>
           <button className={view === "settings" ? "navActive" : ""} onClick={() => setView("settings")}>
             <Settings size={18} /> 设置
           </button>
         </nav>
       </header>
 
-      {view === "settings" ? (
+      {view === "research" ? (
+        <ResearchReportsView />
+      ) : view === "settings" ? (
         <section className="settingsPage">
           <div className="settingsHero">
             <div>
@@ -899,6 +922,98 @@ function AnalysisView({ analysis }: { analysis: Analysis }) {
       <pre className="freeOutput">{output}</pre>
     </div>
   );
+}
+
+function ResearchReportsView() {
+  const [reports, setReports] = useState<ResearchReportResponse>({ items: [], total: 0 });
+  const [selected, setSelected] = useState<ResearchReportDetail | null>(null);
+  const [loading, setLoading] = useState(true);
+  const [error, setError] = useState("");
+
+  async function selectReport(report: ResearchReportSummary) {
+    setError("");
+    try {
+      setSelected(await api<ResearchReportDetail>(`/api/research-reports/${report.id}`));
+    } catch (requestError) {
+      setError(requestError instanceof Error ? requestError.message : "研报加载失败");
+    }
+  }
+
+  useEffect(() => {
+    async function loadReports() {
+      try {
+        const result = await api<ResearchReportResponse>("/api/research-reports");
+        setReports(result);
+        if (result.items.length) await selectReport(result.items[0]);
+      } catch (requestError) {
+        setError(requestError instanceof Error ? requestError.message : "研报列表加载失败");
+      } finally {
+        setLoading(false);
+      }
+    }
+    loadReports();
+  }, []);
+
+  return (
+    <section className="researchPage">
+      <header className="researchHero">
+        <div>
+          <span className="researchEyebrow">TRANSLATED RESEARCH ARCHIVE</span>
+          <h2>研报翻译</h2>
+          <p>浏览自动抓取并翻译的研究报告，共 {reports.total} 篇。</p>
+        </div>
+      </header>
+
+      {error && <div className="researchError">{error}</div>}
+      <div className="researchWorkspace">
+        <aside className="reportShelf" aria-label="研报列表">
+          <div className="reportShelfHead">
+            <strong>报告目录</strong>
+            <span>{reports.total}</span>
+          </div>
+          {loading && <p className="empty">正在载入研报…</p>}
+          {!loading && reports.items.length === 0 && <p className="empty">尚未收到研报数据。</p>}
+          {reports.items.map((report, index) => (
+            <button
+              type="button"
+              className={`reportShelfItem ${selected?.id === report.id ? "selected" : ""}`}
+              key={report.id}
+              onClick={() => selectReport(report)}
+            >
+              <span className="reportIndex">{String(index + 1).padStart(2, "0")}</span>
+              <span className="reportShelfCopy">
+                <strong>{report.report_name}</strong>
+                <small>{report.source} · {formatReportDate(report.updated_at)}</small>
+              </span>
+            </button>
+          ))}
+        </aside>
+
+        <article className="reportReader">
+          {selected ? (
+            <>
+              <header className="reportReaderHead">
+                <div>
+                  <span>{selected.source}</span>
+                  <h3>{selected.report_name}</h3>
+                </div>
+                <time>{formatReportDate(selected.updated_at)}</time>
+              </header>
+              <div className="translatedText">{selected.translated_text}</div>
+            </>
+          ) : (
+            !loading && <div className="reportEmpty"><FileText size={34} /><p>从左侧选择一篇研报开始阅读。</p></div>
+          )}
+        </article>
+      </div>
+    </section>
+  );
+}
+
+function formatReportDate(value: string) {
+  const normalized = value.includes("T") ? value : `${value.replace(" ", "T")}Z`;
+  const date = new Date(normalized);
+  return Number.isNaN(date.getTime()) ? value : date.toLocaleString("zh-CN", { dateStyle: "medium", timeStyle: "short" });
 }
 
 createRoot(document.getElementById("root")!).render(<App />);

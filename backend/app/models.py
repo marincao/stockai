@@ -175,6 +175,23 @@ class ResearchReportUploadResponse(BaseModel):
     inserted: bool
 
 
+class ResearchReportSummary(BaseModel):
+    id: int
+    report_name: str
+    source: str
+    created_at: str
+    updated_at: str
+
+
+class ResearchReportListResponse(BaseModel):
+    items: list[ResearchReportSummary]
+    total: int
+
+
+class ResearchReportDetail(ResearchReportSummary):
+    translated_text: str
+
+
 class CleanupOldRequest(BaseModel):
     days: int = Field(default=3, ge=1, le=30)
 

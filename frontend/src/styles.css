@@ -624,6 +624,182 @@ p {
   z-index: 40;
 }
 
+.researchPage {
+  display: grid;
+  gap: 16px;
+}
+
+.researchHero {
+  background: linear-gradient(120deg, #ffffff 0%, #f0f7f6 100%);
+  border: 1px solid #d7e0e4;
+  border-radius: 8px;
+  box-shadow: 0 18px 42px rgba(35, 54, 64, 0.07);
+  padding: 22px 24px;
+}
+
+.researchEyebrow {
+  color: #16807a;
+  display: block;
+  font-size: 11px;
+  font-weight: 800;
+  letter-spacing: 0.16em;
+  margin-bottom: 8px;
+}
+
+.researchHero h2 {
+  font-size: 28px;
+  margin-bottom: 5px;
+}
+
+.researchHero p,
+.reportShelfCopy small,
+.reportReaderHead time {
+  color: #62717a;
+}
+
+.researchWorkspace {
+  display: grid;
+  gap: 16px;
+  grid-template-columns: minmax(280px, 0.72fr) minmax(0, 1.8fr);
+  min-height: calc(100vh - 190px);
+}
+
+.reportShelf,
+.reportReader {
+  background: rgba(255, 255, 255, 0.94);
+  border: 1px solid #d7e0e4;
+  border-radius: 8px;
+  box-shadow: 0 18px 42px rgba(35, 54, 64, 0.07);
+  overflow: hidden;
+}
+
+.reportShelfHead {
+  align-items: center;
+  border-bottom: 1px solid #e6edef;
+  display: flex;
+  justify-content: space-between;
+  padding: 15px 16px;
+}
+
+.reportShelfHead span {
+  background: #e5f3f1;
+  border-radius: 999px;
+  color: #12665f;
+  font-size: 12px;
+  padding: 3px 8px;
+}
+
+.reportShelf > .empty {
+  padding: 20px 16px;
+}
+
+.reportShelfItem {
+  border: 0;
+  border-bottom: 1px solid #edf2f4;
+  border-radius: 0;
+  box-shadow: none;
+  display: grid;
+  gap: 12px;
+  grid-template-columns: 30px minmax(0, 1fr);
+  height: auto;
+  padding: 14px 16px;
+  text-align: left;
+  width: 100%;
+}
+
+.reportShelfItem:hover:not(:disabled),
+.reportShelfItem.selected {
+  background: #edf8f6;
+  border-color: #d8ebe8;
+  box-shadow: inset 3px 0 0 #16807a;
+  transform: none;
+}
+
+.reportIndex {
+  color: #8aa1aa;
+  font-family: ui-monospace, "SFMono-Regular", Consolas, monospace;
+  font-size: 11px;
+  padding-top: 3px;
+}
+
+.reportShelfCopy {
+  display: grid;
+  gap: 6px;
+  min-width: 0;
+}
+
+.reportShelfCopy strong {
+  line-height: 1.4;
+  overflow-wrap: anywhere;
+}
+
+.reportShelfCopy small {
+  font-size: 11px;
+}
+
+.reportReader {
+  padding: 24px clamp(22px, 4vw, 58px) 48px;
+}
+
+.reportReaderHead {
+  align-items: start;
+  border-bottom: 1px solid #dfe8ea;
+  display: flex;
+  gap: 20px;
+  justify-content: space-between;
+  margin-bottom: 26px;
+  padding-bottom: 20px;
+}
+
+.reportReaderHead span {
+  color: #16807a;
+  display: block;
+  font-size: 12px;
+  font-weight: 700;
+  margin-bottom: 8px;
+  text-transform: uppercase;
+}
+
+.reportReaderHead h3 {
+  font-size: clamp(20px, 2.4vw, 30px);
+  line-height: 1.35;
+  overflow-wrap: anywhere;
+}
+
+.reportReaderHead time {
+  flex: none;
+  font-size: 12px;
+}
+
+.translatedText {
+  color: #26343d;
+  font-family: "Noto Serif SC", "Songti SC", SimSun, serif;
+  font-size: 16px;
+  line-height: 1.9;
+  margin: 0 auto;
+  max-width: 860px;
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+}
+
+.reportEmpty {
+  align-items: center;
+  color: #73828a;
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  justify-content: center;
+  min-height: 420px;
+}
+
+.researchError {
+  background: #fdecea;
+  border: 1px solid #f2c7c1;
+  border-radius: 8px;
+  color: #932f24;
+  padding: 11px 14px;
+}
+
 .spin {
   animation: spin 0.9s linear infinite;
 }
@@ -653,9 +829,23 @@ p {
   .workflowBar,
   .databaseBar,
   .workspace,
+  .researchWorkspace,
   .settingsGrid,
   .promptEditorGrid {
     grid-template-columns: 1fr;
+  }
+
+  .researchWorkspace {
+    min-height: 0;
+  }
+
+  .reportShelf {
+    max-height: 340px;
+    overflow-y: auto;
+  }
+
+  .reportReaderHead {
+    flex-direction: column;
   }
 
   .row {

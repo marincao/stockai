@@ -32,6 +32,8 @@ from .models import (
     PublicModelSettings,
     ResearchReportUploadRequest,
     ResearchReportUploadResponse,
+    ResearchReportDetail,
+    ResearchReportListResponse,
     ScreenRunRequest,
     ScreenRunResponse,
 )
@@ -50,6 +52,8 @@ from .repository import (
     get_screen_candidates,
     list_chat_messages,
     list_announcements,
+    list_research_reports,
+    get_research_report,
     mark_analysis_status,
     mark_screen_status,
     reset_screening,
@@ -129,6 +133,20 @@ def upload_research_report(payload: ResearchReportUploadRequest) -> ResearchRepo
         source=payload.source,
         inserted=inserted,
     )
+
+
+@app.get("/api/research-reports", response_model=ResearchReportListResponse)
+def research_reports() -> ResearchReportListResponse:
+    items, total = list_research_reports()
+    return ResearchReportListResponse(items=items, total=total)
+
+
+@app.get("/api/research-reports/{report_id}", response_model=ResearchReportDetail)
+def research_report_detail(report_id: int) -> ResearchReportDetail:
+    report = get_research_report(report_id)
+    if not report:
+        raise HTTPException(status_code=404, detail="Research report not found")
+    return ResearchReportDetail(**report)
 
 
 @app.post("/api/fetch-announcements", response_model=FetchAnnouncementsResponse)

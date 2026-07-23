@@ -407,6 +407,28 @@ def upsert_research_report(report_name: str, translated_text: str, source: str =
         return int(cursor.lastrowid), True
 
 
+def list_research_reports() -> tuple[list[dict[str, Any]], int]:
+    with get_connection() as conn:
+        rows = conn.execute(
+            """
+            SELECT id, report_name, source, created_at, updated_at
+            FROM research_reports
+            ORDER BY updated_at DESC, id DESC
+            """
+        ).fetchall()
+        total = conn.execute("SELECT COUNT(*) AS count FROM research_reports").fetchone()["count"]
+    return [row_to_dict(row) or {} for row in rows], int(total)
+
+
+def get_research_report(report_id: int) -> dict[str, Any] | None:
+    with get_connection() as conn:
+        row = conn.execute(
+            "SELECT * FROM research_reports WHERE id = ?",
+            (report_id,),
+        ).fetchone()
+    return row_to_dict(row)
+
+
 def cleanup_old_announcements(days: int = 3) -> int:
     cutoff = (date.today() - timedelta(days=days - 1)).strftime("%Y%m%d")
     with get_connection() as conn:
