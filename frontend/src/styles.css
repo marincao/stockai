@@ -526,11 +526,24 @@ p {
 
 .settingsGrid label,
 .promptEditor label,
-.promptModal label {
+.promptModal label,
+.researchPromptGrid label {
   color: #43515a;
   display: grid;
   gap: 6px;
   font-size: 13px;
+}
+
+.settingsHint {
+  color: #62717a;
+  font-size: 13px;
+  margin-top: 5px;
+}
+
+.researchPromptGrid {
+  display: grid;
+  gap: 12px;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
 }
 
 .promptSettings {
@@ -672,18 +685,54 @@ p {
 
 .researchWorkspace {
   display: grid;
-  gap: 16px;
-  grid-template-columns: minmax(280px, 0.72fr) minmax(0, 1.8fr);
-  min-height: calc(100vh - 190px);
+  gap: 0;
+  height: calc(100vh - 210px);
+  min-height: 560px;
+  overflow: hidden;
 }
 
 .reportShelf,
-.reportReader {
+.reportReader,
+.reportAnalysisPane {
   background: rgba(255, 255, 255, 0.94);
   border: 1px solid #d7e0e4;
   border-radius: 8px;
   box-shadow: 0 18px 42px rgba(35, 54, 64, 0.07);
   overflow: hidden;
+}
+
+.reportShelf,
+.reportReader,
+.reportAnalysisPane {
+  min-width: 0;
+  overflow-y: auto;
+}
+
+.researchDivider {
+  cursor: col-resize;
+  position: relative;
+  touch-action: none;
+}
+
+.researchDivider::after {
+  background: #c4d3d8;
+  border-radius: 999px;
+  content: "";
+  inset: 12px 3px;
+  position: absolute;
+  transition: background 0.16s ease, inset 0.16s ease;
+}
+
+.researchDivider:hover::after,
+.researchDivider:focus-visible::after,
+.isResizingResearch .researchDivider::after {
+  background: #16807a;
+  inset: 8px 2px;
+}
+
+.isResizingResearch {
+  cursor: col-resize;
+  user-select: none;
 }
 
 .reportShelfHead {
@@ -826,12 +875,11 @@ p {
   overflow-wrap: anywhere;
 }
 
-.reportAnalysis {
-  border-top: 1px solid #dfe8ea;
+.reportAnalysisPane {
   display: grid;
   gap: 12px;
-  margin-top: 32px;
-  padding-top: 22px;
+  align-content: start;
+  padding: 20px;
 }
 
 .reportAnalysisHead {
@@ -908,17 +956,32 @@ p {
   .workspace,
   .researchWorkspace,
   .settingsGrid,
+  .researchPromptGrid,
   .promptEditorGrid {
     grid-template-columns: 1fr;
   }
 
   .researchWorkspace {
+    display: grid;
+    gap: 12px;
+    grid-template-columns: 1fr !important;
+    height: auto;
     min-height: 0;
+    overflow: visible;
+  }
+
+  .researchDivider {
+    display: none;
   }
 
   .reportShelf {
     max-height: 340px;
     overflow-y: auto;
+  }
+
+  .reportReader,
+  .reportAnalysisPane {
+    max-height: 70vh;
   }
 
   .reportReaderHead {

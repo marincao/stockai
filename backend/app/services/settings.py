@@ -20,6 +20,11 @@ DEFAULT_ANALYSIS_PROMPT_SETTINGS = {
 可以按你认为合适的结构组织内容，但必须只使用公告原文能支持的信息。""",
 }
 
+DEFAULT_RESEARCH_PROMPT_SETTINGS = {
+    "system_prompt": "你是一个严谨的投资研究报告分析助手。只能依据报告译文总结观点、证据、风险与待验证事项，不得编造信息或给出买卖指令。",
+    "user_instruction": "请分析这篇研究报告译文，提炼核心观点、关键数据与论据、主要风险，以及后续需要验证的问题。",
+}
+
 DEFAULT_ANALYSIS_PROMPT_PRESETS = [
     {
         "id": "default",
@@ -113,6 +118,34 @@ def save_analysis_prompt_settings(settings: dict[str, Any]) -> dict[str, Any]:
     first = {**presets["items"][0], **settings, "is_active": True}
     save_analysis_prompt_presets({"items": [first, *presets["items"][1:]]})
     return get_analysis_prompt_settings()
+
+
+def get_research_prompt_settings() -> dict[str, Any]:
+    with get_connection() as conn:
+        row = conn.execute("SELECT value FROM settings WHERE key = 'research_prompt'").fetchone()
+    if row is None:
+        return {**DEFAULT_RESEARCH_PROMPT_SETTINGS, "free_output": True}
+    return {**DEFAULT_RESEARCH_PROMPT_SETTINGS, **json.loads(row["value"]), "free_output": True}
+
+
+def save_research_prompt_settings(settings: dict[str, Any]) -> dict[str, Any]:
+    normalized = {
+        "system_prompt": str(settings.get("system_prompt") or DEFAULT_RESEARCH_PROMPT_SETTINGS["system_prompt"]),
+        "user_instruction": str(settings.get("user_instruction") or DEFAULT_RESEARCH_PROMPT_SETTINGS["user_instruction"]),
+        "free_output": True,
+    }
+    with get_connection() as conn:
+        conn.execute(
+            """
+            INSERT INTO settings(key, value, updated_at)
+            VALUES ('research_prompt', ?, CURRENT_TIMESTAMP)
+            ON CONFLICT(key) DO UPDATE SET
+                value = excluded.value,
+                updated_at = CURRENT_TIMESTAMP
+            """,
+            (json.dumps(normalized, ensure_ascii=False),),
+        )
+    return normalized
 
 
 def save_analysis_prompt_presets(presets: dict[str, Any]) -> dict[str, Any]:

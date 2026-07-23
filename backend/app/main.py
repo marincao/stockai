@@ -79,10 +79,12 @@ from .services.settings import (
     get_analysis_prompt_settings,
     get_analysis_prompt_presets,
     get_model_settings,
+    get_research_prompt_settings,
     public_model_settings,
     save_analysis_prompt_presets,
     save_analysis_prompt_settings,
     save_model_settings,
+    save_research_prompt_settings,
 )
 
 
@@ -217,7 +219,7 @@ def analyze_research_report(report_id: int) -> ResearchReportDetail:
     if not report:
         raise HTTPException(status_code=404, detail="Research report not found")
     provider = provider_from_settings(get_model_settings())
-    if not _analyze_research_report(report, provider, get_analysis_prompt_settings()):
+    if not _analyze_research_report(report, provider):
         failed = get_research_report(report_id)
         raise HTTPException(status_code=500, detail=(failed or {}).get("analysis_error") or "Research report analysis failed")
     saved = get_research_report(report_id)
@@ -228,7 +230,6 @@ def analyze_research_report(report_id: int) -> ResearchReportDetail:
 
 def _research_analysis_worker(limit: int, report_ids: list[int] | None = None) -> None:
     provider = provider_from_settings(get_model_settings())
-    prompt_settings = get_analysis_prompt_settings()
     candidates = get_research_reports_by_ids(report_ids) if report_ids else get_research_analysis_candidates(limit)
     with research_analysis_lock:
         research_analysis_job["requested"] = len(candidates)
@@ -240,7 +241,7 @@ def _research_analysis_worker(limit: int, report_ids: list[int] | None = None) -
                     research_analysis_job["message"] = "研报分析已取消"
                     break
                 research_analysis_job["current_id"] = report["id"]
-            ok = _analyze_research_report(report, provider, prompt_settings)
+            ok = _analyze_research_report(report, provider)
             with research_analysis_lock:
                 research_analysis_job["analyzed" if ok else "failed"] += 1
         with research_analysis_lock:
@@ -252,7 +253,7 @@ def _research_analysis_worker(limit: int, report_ids: list[int] | None = None) -
             research_analysis_job["current_id"] = None
 
 
-def _analyze_research_report(report: dict, provider, prompt_settings: dict) -> bool:
+def _analyze_research_report(report: dict, provider) -> bool:
     report_id = report["id"]
     mark_research_analysis_status(report_id, "running")
     document = {
@@ -261,11 +262,7 @@ def _analyze_research_report(report: dict, provider, prompt_settings: dict) -> b
         "name": report["source"],
         "source": report["source"],
     }
-    report_prompt_settings = {
-        **prompt_settings,
-        "system_prompt": "你是一个严谨的投资研究报告分析助手。只能依据报告译文总结观点、证据、风险与待验证事项，不得编造信息或给出买卖指令。",
-        "user_instruction": "请分析这篇研究报告译文，提炼核心观点、关键数据与论据、主要风险，以及后续需要验证的问题。",
-    }
+    report_prompt_settings = get_research_prompt_settings()
     try:
         result = normalize_analysis(provider.analyze(document, report["translated_text"], report_prompt_settings))
         save_research_analysis(report_id, provider.provider_name, provider.model, result["free_output"])
@@ -614,6 +611,16 @@ def get_analysis_prompt() -> AnalysisPromptSettings:
 @app.post("/api/settings/analysis-prompt", response_model=AnalysisPromptSettings)
 def save_analysis_prompt(payload: AnalysisPromptSettings) -> AnalysisPromptSettings:
     return AnalysisPromptSettings(**save_analysis_prompt_settings(payload.model_dump()))
+
+
+@app.get("/api/settings/research-prompt", response_model=AnalysisPromptSettings)
+def get_research_prompt() -> AnalysisPromptSettings:
+    return AnalysisPromptSettings(**get_research_prompt_settings())
+
+
+@app.post("/api/settings/research-prompt", response_model=AnalysisPromptSettings)
+def save_research_prompt(payload: AnalysisPromptSettings) -> AnalysisPromptSettings:
+    return AnalysisPromptSettings(**save_research_prompt_settings(payload.model_dump()))
 
 
 @app.get("/api/settings/analysis-prompts", response_model=AnalysisPromptPresetList)

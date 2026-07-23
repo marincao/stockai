@@ -1,4 +1,4 @@
-import React, { useEffect, useMemo, useState } from "react";
+import React, { useEffect, useMemo, useRef, useState } from "react";
 import { createRoot } from "react-dom/client";
 import {
   Brain,
@@ -155,6 +155,12 @@ type AnalysisPromptPreset = {
   is_active: boolean;
 };
 
+type ResearchPromptSettings = {
+  system_prompt: string;
+  user_instruction: string;
+  free_output: boolean;
+};
+
 type ResearchReportSummary = {
   id: number;
   report_name: string;
@@ -244,6 +250,11 @@ function App() {
     api_key: "",
   });
   const [analysisPrompts, setAnalysisPrompts] = useState<AnalysisPromptPreset[]>([]);
+  const [researchPrompt, setResearchPrompt] = useState<ResearchPromptSettings>({
+    system_prompt: "",
+    user_instruction: "",
+    free_output: true,
+  });
   const [selectedIds, setSelectedIds] = useState<number[]>([]);
   const [loading, setLoading] = useState("");
   const [message, setMessage] = useState("");
@@ -297,6 +308,10 @@ function App() {
     setAnalysisPrompts(result.items);
   }
 
+  async function loadResearchPrompt() {
+    setResearchPrompt(await api<ResearchPromptSettings>("/api/settings/research-prompt"));
+  }
+
   async function loadAnalysisJob() {
     setAnalysisJob(await api<AnalysisJobStatus>("/api/analysis/auto/status"));
   }
@@ -309,6 +324,7 @@ function App() {
     loadOverview().catch((error) => setMessage(error.message));
     loadSettings().catch((error) => setMessage(error.message));
     loadAnalysisPrompts().catch((error) => setMessage(error.message));
+    loadResearchPrompt().catch((error) => setMessage(error.message));
     loadAnalysisJob().catch((error) => setMessage(error.message));
   }, []);
 
@@ -568,6 +584,22 @@ function App() {
     }
   }
 
+  async function saveResearchPrompt() {
+    setLoading("researchPrompt");
+    try {
+      const result = await api<ResearchPromptSettings>("/api/settings/research-prompt", {
+        method: "POST",
+        body: JSON.stringify(researchPrompt),
+      });
+      setResearchPrompt(result);
+      setMessage("研报自动分析 Prompt 已保存");
+    } catch (error) {
+      setMessage(error instanceof Error ? error.message : "保存研报 Prompt 失败");
+    } finally {
+      setLoading("");
+    }
+  }
+
   function updateAnalysisPrompt(id: string, patch: Partial<AnalysisPromptPreset>) {
     setAnalysisPrompts((current) => current.map((item) => (item.id === id ? { ...item, ...patch } : item)));
   }
@@ -688,9 +720,31 @@ function App() {
             </button>
           </section>
 
+          <section className="settingsPane researchPromptSettings">
+            <div className="sectionHead">
+              <div>
+                <h3>研报翻译自动分析 Prompt</h3>
+                <p className="settingsHint">仅用于研报的单篇分析和自动分析，不影响工作台公告分析。</p>
+              </div>
+              <button className="primary" onClick={saveResearchPrompt} disabled={loading === "researchPrompt"}>
+                {loading === "researchPrompt" ? <Loader2 className="spin" size={17} /> : <Save size={17} />} 保存研报 Prompt
+              </button>
+            </div>
+            <div className="researchPromptGrid">
+              <label>
+                System Prompt
+                <textarea value={researchPrompt.system_prompt} onChange={(event) => setResearchPrompt({ ...researchPrompt, system_prompt: event.target.value })} rows={5} />
+              </label>
+              <label>
+                User Instruction
+                <textarea value={researchPrompt.user_instruction} onChange={(event) => setResearchPrompt({ ...researchPrompt, user_instruction: event.target.value })} rows={5} />
+              </label>
+            </div>
+          </section>
+
           <section className="settingsPane promptSettings">
             <div className="sectionHead">
-              <h3>自动分析 Prompt</h3>
+              <h3>工作台公告自动分析 Prompt</h3>
               <button onClick={addAnalysisPrompt}>
                 <Plus size={17} /> 新增
               </button>
@@ -936,6 +990,41 @@ function ResearchReportsView() {
   const [action, setAction] = useState("");
   const [error, setError] = useState("");
   const [job, setJob] = useState<AnalysisJobStatus | null>(null);
+  const workspaceRef = useRef<HTMLDivElement>(null);
+  const [shelfWidth, setShelfWidth] = useState(300);
+  const [readerWidth, setReaderWidth] = useState(620);
+
+  function beginResize(target: "shelf" | "reader", event: React.PointerEvent<HTMLDivElement>) {
+    const containerWidth = workspaceRef.current?.getBoundingClientRect().width ?? 0;
+    const startX = event.clientX;
+    const startShelf = shelfWidth;
+    const startReader = readerWidth;
+    const onMove = (moveEvent: PointerEvent) => {
+      const delta = moveEvent.clientX - startX;
+      if (target === "shelf") {
+        setShelfWidth(Math.min(Math.max(220, startShelf + delta), Math.max(220, containerWidth - startReader - 310)));
+      } else {
+        setReaderWidth(Math.min(Math.max(360, startReader + delta), Math.max(360, containerWidth - startShelf - 310)));
+      }
+    };
+    const onUp = () => {
+      window.removeEventListener("pointermove", onMove);
+      window.removeEventListener("pointerup", onUp);
+      document.body.classList.remove("isResizingResearch");
+    };
+    document.body.classList.add("isResizingResearch");
+    window.addEventListener("pointermove", onMove);
+    window.addEventListener("pointerup", onUp);
+  }
+
+  function resizeWithKeyboard(target: "shelf" | "reader", event: React.KeyboardEvent<HTMLDivElement>) {
+    if (event.key !== "ArrowLeft" && event.key !== "ArrowRight") return;
+    event.preventDefault();
+    const delta = event.key === "ArrowLeft" ? -24 : 24;
+    const containerWidth = workspaceRef.current?.getBoundingClientRect().width ?? 1400;
+    if (target === "shelf") setShelfWidth((width) => Math.min(Math.max(220, width + delta), Math.max(220, containerWidth - readerWidth - 310)));
+    else setReaderWidth((width) => Math.min(Math.max(360, width + delta), Math.max(360, containerWidth - shelfWidth - 310)));
+  }
 
   async function selectReport(report: ResearchReportSummary) {
     setError("");
@@ -1067,7 +1156,11 @@ function ResearchReportsView() {
       {job?.message && <div className="researchJob">{job.message}{job.requested ? ` · ${job.analyzed}/${job.requested}，失败 ${job.failed}` : ""}</div>}
 
       {error && <div className="researchError">{error}</div>}
-      <div className="researchWorkspace">
+      <div
+        className="researchWorkspace"
+        ref={workspaceRef}
+        style={{ gridTemplateColumns: `${shelfWidth}px 8px ${readerWidth}px 8px minmax(280px, 1fr)` }}
+      >
         <aside className="reportShelf" aria-label="研报列表">
           <div className="reportShelfHead">
             <strong>报告目录</strong>
@@ -1092,6 +1185,8 @@ function ResearchReportsView() {
           ))}
         </aside>
 
+        <div className="researchDivider" role="separator" tabIndex={0} aria-label="调整报告目录宽度" onPointerDown={(event) => beginResize("shelf", event)} onKeyDown={(event) => resizeWithKeyboard("shelf", event)} />
+
         <article className="reportReader">
           {selected ? (
             <>
@@ -1103,26 +1198,38 @@ function ResearchReportsView() {
                 <time>{formatReportDate(selected.updated_at)}</time>
               </header>
               <div className="translatedText">{selected.translated_text}</div>
-              <section className="reportAnalysis">
-                <div className="reportAnalysisHead">
-                  <h4>AI 分析</h4>
-                  <button onClick={() => analyzeReport(selected)} disabled={action === `analyze-${selected.id}`}>
-                    {action === `analyze-${selected.id}` ? <Loader2 className="spin" size={16} /> : <Brain size={16} />} 分析这篇研报
-                  </button>
-                </div>
-                {selected.analysis_output ? (
-                  <>
-                    <small>{selected.analysis_provider} / {selected.analysis_model}</small>
-                    <div className="analysisOutput">{selected.analysis_output}</div>
-                  </>
-                ) : <p className="empty">状态：{selected.analysis_status}。分析完成后结果会显示在这里。</p>}
-                {selected.analysis_error && <p className="researchError">{selected.analysis_error}</p>}
-              </section>
             </>
           ) : (
             !loading && <div className="reportEmpty"><FileText size={34} /><p>从左侧选择一篇研报开始阅读。</p></div>
           )}
         </article>
+
+        <div className="researchDivider" role="separator" tabIndex={0} aria-label="调整报告阅读区宽度" onPointerDown={(event) => beginResize("reader", event)} onKeyDown={(event) => resizeWithKeyboard("reader", event)} />
+
+        <aside className="reportAnalysisPane">
+          <div className="reportAnalysisHead">
+            <div>
+              <span className="researchEyebrow">AI RESEARCH NOTES</span>
+              <h3>AI 分析</h3>
+            </div>
+            {selected && (
+              <button onClick={() => analyzeReport(selected)} disabled={action === `analyze-${selected.id}`}>
+                {action === `analyze-${selected.id}` ? <Loader2 className="spin" size={16} /> : <Brain size={16} />} 分析
+              </button>
+            )}
+          </div>
+          {selected?.analysis_output ? (
+            <>
+              <small>{selected.analysis_provider} / {selected.analysis_model}</small>
+              <div className="analysisOutput">{selected.analysis_output}</div>
+            </>
+          ) : selected ? (
+            <p className="empty">状态：{selected.analysis_status}。分析完成后结果会显示在这里。</p>
+          ) : (
+            <p className="empty">选择一篇研报后，可以在这里启动并查看 AI 分析。</p>
+          )}
+          {selected?.analysis_error && <p className="researchError">{selected.analysis_error}</p>}
+        </aside>
       </div>
     </section>
   );
